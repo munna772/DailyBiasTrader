@@ -197,8 +197,9 @@ function renderChart(){
       frame.dataset.dbtLoadObserved = '1';
       frame.addEventListener('load', function(){
         if(generation !== chartGeneration) return;
-        showChartMessage('TradingView chart frame loaded. Waiting for the selected market feed…', true);
-        setFeedStatus('CHART FRAME LOADED', false);
+        if(chartTimer) clearTimeout(chartTimer);
+        showChartMessage('', false);
+        setFeedStatus('CHART FRAME LOADED', true);
       }, {once:true});
     }
   });
