@@ -31,6 +31,7 @@ select{font-size:13px}
 .notice{font-size:11px;line-height:1.5;color:#a9b8cc}
 .notice.warn{color:#ffd27b}
 #tv_chart{height:440px;min-height:360px;width:100%;overflow:hidden;border-radius:10px;background:#0b1423;position:relative}
+#tv_chart iframe{display:block;width:100%;height:100%;border:0;background:#0b1423}
 .tradingview-widget-container,.tradingview-widget-container__widget{height:100%;width:100%}
 #chartMessage{padding:12px 10px;color:var(--amber);line-height:1.5;min-height:42px}
 .levels,.entry-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #1b2a3d;font-size:12px}
@@ -95,7 +96,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 <section class="panel">
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
-  <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The current implementation searches up to 500 earlier H1 candles. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
+  <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The implementation searches all earlier H1 candles returned by the market-data provider. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
   <p class="notice">M5 first entry: touch of 0.5; requested SL 0.618 and TP 1. Second entry: sweep of 0.618 and close back across; requested BUY stop is the sweep candle high and SELL stop is its low; TP 1.</p>
   <p class="notice warn">Risk validation: the specified stop-loss levels are on the wrong side of the entry under the specified Fibonacci direction. The app preserves your requested levels but blocks those setups instead of presenting them as safe or executable trades.</p>
 </section>
@@ -109,7 +110,6 @@ const chartSymbols = {XAUUSD:'OANDA:XAUUSD',USOIL:'TVC:USOIL',XAGUSD:'OANDA:XAGU
 let selectedSymbol = 'XAUUSD';
 let selectedInterval = 'D';
 let chartTimer = null;
-let chartObserver = null;
 let chartGeneration = 0;
 let strategyBusy = false;
 
@@ -131,90 +131,73 @@ function showChartFailure(text){
 function renderChart(){
   const generation = ++chartGeneration;
   if(chartTimer) clearTimeout(chartTimer);
-  if(chartObserver) { chartObserver.disconnect(); chartObserver = null; }
   const host = el('tv_chart');
   clearElement(host);
-  showChartMessage('Connecting to TradingView…', true);
+  showChartMessage('Opening TradingView chart…', true);
   setFeedStatus('LOADING CHART', false);
 
-  const container = document.createElement('div');
-  container.className = 'tradingview-widget-container';
-  container.style.height = '100%';
-  container.style.width = '100%';
+  // Use TradingView's isolated iframe endpoint. Do not dynamically inject
+  // their script: their own FAQ warns that dynamically injected widget
+  // scripts can be blocked or fail to initialize.
+  const frame = document.createElement('iframe');
+  frame.id = 'dailybiastrader_chart_frame_' + generation;
+  frame.title = selectedSymbol + ' TradingView chart';
+  frame.loading = 'eager';
+  frame.referrerPolicy = 'origin';
+  frame.allowFullscreen = true;
+  frame.style.cssText = 'display:block;width:100%;height:100%;border:0;background:#0b1423';
 
-  const widgetHost = document.createElement('div');
-  widgetHost.className = 'tradingview-widget-container__widget';
-  widgetHost.style.height = '100%';
-  widgetHost.style.width = '100%';
+  const params = new URLSearchParams();
+  params.set('frameElementId', frame.id);
+  params.set('symbol', chartSymbols[selectedSymbol]);
+  params.set('interval', selectedInterval);
+  params.set('hidesidetoolbar', '0');
+  params.set('hidetoptoolbar', '0');
+  params.set('symboledit', '0');
+  params.set('saveimage', '0');
+  params.set('toolbarbg', '080d18');
+  params.set('studies', '[]');
+  params.set('theme', 'dark');
+  params.set('style', '1');
+  params.set('timezone', 'Asia/Dhaka');
+  params.set('withdateranges', '1');
+  params.set('hideideas', '1');
+  params.set('studies_overrides', '{}');
+  params.set('overrides', JSON.stringify({
+    'mainSeriesProperties.candleStyle.upColor': '#38d996',
+    'mainSeriesProperties.candleStyle.downColor': '#ff647c',
+    'mainSeriesProperties.candleStyle.borderUpColor': '#38d996',
+    'mainSeriesProperties.candleStyle.borderDownColor': '#ff647c',
+    'mainSeriesProperties.candleStyle.wickUpColor': '#38d996',
+    'mainSeriesProperties.candleStyle.wickDownColor': '#ff647c'
+  }));
+  params.set('enabled_features', '[]');
+  params.set('disabled_features', '[]');
+  params.set('locale', 'en');
+  params.set('utm_source', 'dailybiastrader-preview.onrender.com');
+  params.set('utm_medium', 'widget');
+  params.set('utm_campaign', 'chart');
 
-  const script = document.createElement('script');
-  script.type = 'text/javascript';
-  script.async = true;
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  const config = {
-    autosize: true,
-    symbol: chartSymbols[selectedSymbol],
-    interval: selectedInterval,
-    timezone: 'Asia/Dhaka',
-    theme: 'dark',
-    style: '1',
-    locale: 'en',
-    allow_symbol_change: false,
-    calendar: false,
-    details: false,
-    hide_side_toolbar: false,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    hide_volume: false,
-    save_image: false,
-    withdateranges: true,
-    backgroundColor: '#080d18',
-    gridColor: '#1e2d43',
-    support_host: 'https://www.tradingview.com',
-    overrides: {
-      'mainSeriesProperties.candleStyle.upColor': '#38d996',
-      'mainSeriesProperties.candleStyle.downColor': '#ff647c',
-      'mainSeriesProperties.candleStyle.borderUpColor': '#38d996',
-      'mainSeriesProperties.candleStyle.borderDownColor': '#ff647c',
-      'mainSeriesProperties.candleStyle.wickUpColor': '#38d996',
-      'mainSeriesProperties.candleStyle.wickDownColor': '#ff647c'
-    }
-  };
-  script.textContent = JSON.stringify(config);
-  script.onerror = function(){
+  frame.addEventListener('load', function(){
     if(generation !== chartGeneration) return;
-    showChartFailure('TradingView’s chart script could not load. Check internet access or try opening the preview in Chrome.');
-  };
-
-  container.appendChild(widgetHost);
-  container.appendChild(script);
-  host.appendChild(container);
-
-  chartObserver = new MutationObserver(function(){
+    if(chartTimer) clearTimeout(chartTimer);
+    showChartMessage('', false);
+    // Cross-origin iframe isolation means this confirms the frame loaded,
+    // not that the selected exchange supplied real-time data.
+    setFeedStatus('CHART FRAME LOADED', true);
+  }, {once:true});
+  frame.addEventListener('error', function(){
     if(generation !== chartGeneration) return;
-    const frame = widgetHost.querySelector('iframe');
-    if(frame && !frame.dataset.dbtLoadObserved){
-      frame.dataset.dbtLoadObserved = '1';
-      frame.addEventListener('load', function(){
-        if(generation !== chartGeneration) return;
-        if(chartTimer) clearTimeout(chartTimer);
-        showChartMessage('', false);
-        setFeedStatus('CHART FRAME LOADED', true);
-      }, {once:true});
-    }
-  });
-  chartObserver.observe(widgetHost, {childList:true,subtree:true});
+    showChartFailure('TradingView could not load this chart. Check the connection or open the preview in Chrome.');
+  }, {once:true});
+
+  host.appendChild(frame);
+  frame.src = 'https://www.tradingview.com/widgetembed/?' + params.toString();
 
   chartTimer = setTimeout(function(){
     if(generation !== chartGeneration) return;
-    const frame = widgetHost.querySelector('iframe');
-    if(!frame){
-      showChartFailure('TradingView did not create a chart frame. The script may be blocked by the network, browser or WebView.');
-    } else {
-      showChartMessage('The TradingView frame exists but has not confirmed its market feed. Check symbol availability and connection.', true);
-      setFeedStatus('FEED NOT VERIFIED', false);
-    }
-  }, 25000);
+    showChartFailure('TradingView did not finish loading within 30 seconds. Check whether the network or WebView is blocking TradingView.');
+  }, 30000);
 }
 function formatPrice(value){
   return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—';
@@ -306,8 +289,8 @@ async function refreshStrategy(){
     renderFib(s.fib);
     renderEntries(s.entries);
   }catch(error){
-    const message = error && error.name === 'TimeoutError'
-      ? 'Strategy service took too long to respond. A free Render service may be waking up; retry shortly.'
+    const message = error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ? 'Strategy service timed out. A free Render service may be waking up, or the market-data provider may be slow; retry shortly.'
       : (error && error.message) || 'Could not reach the strategy service.';
     el('errorMessage').textContent = message;
     setMetric('dataStatus','UNAVAILABLE','bad');
@@ -348,7 +331,7 @@ document.addEventListener('visibilitychange',function(){
 });
 renderChart();
 refreshStrategy();
-setInterval(function(){ if(!document.hidden) refreshStrategy(); },30000);
+setInterval(function(){ if(!document.hidden) refreshStrategy(); },60000);
 })();
 </script>
 </body>

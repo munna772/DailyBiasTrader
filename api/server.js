@@ -12,7 +12,7 @@ const SYMBOLS = Object.freeze({
   XAGUSD: 'XAG/USD',
   USOIL: 'WTI/USD'
 });
-const CACHE_TTL_MS = 10000;
+const CACHE_TTL_MS = 60000;
 const cache = new Map();
 const rateBuckets = new Map();
 const allowedOrigins = new Set([
@@ -130,6 +130,16 @@ async function loadMarket(symbolKey) {
     fetchSeries(providerSymbol, '1h', 1000),
     fetchSeries(providerSymbol, '5min', 500)
   ]);
+  const incomplete = [];
+  if (dailyRaw.length < 8) incomplete.push('D1=' + dailyRaw.length + ' (need at least 8)');
+  if (hourlyRaw.length < 2) incomplete.push('H1=' + hourlyRaw.length + ' (need at least 2)');
+  if (fiveMinuteRaw.length < 10) incomplete.push('M5=' + fiveMinuteRaw.length + ' (need at least 10)');
+  if (incomplete.length) {
+    const error = new Error('Twelve Data returned incomplete OHLC history: ' + incomplete.join(', ') + '. Check the market symbol and account data access.');
+    error.statusCode = 502;
+    throw error;
+  }
+
   const now = Date.now();
   const value = {
     d1: completedOnly(dailyRaw, 24 * 60 * 60 * 1000, now),

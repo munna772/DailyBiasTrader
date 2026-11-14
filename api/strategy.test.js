@@ -92,3 +92,35 @@ test('second M5 entry requires a completed sweep-and-close candle', () => {
   const entries = findM5Entries([current], 'bullish', current.time, fib, []);
   assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
 });
+
+
+test('H1 sweep searches the full available history, including bars older than 500 candles', () => {
+  const start = Date.parse('2026-10-01T00:00:00Z');
+  const bars = [{ time: start, open: 104, high: 106, low: 100, close: 104 }];
+  for (let i = 1; i <= 500; i++) {
+    bars.push({ time: start + i * 60 * 60 * 1000, open: 101, high: 102, low: 100.5, close: 101.4 });
+  }
+  bars.push({ time: start + 501 * 60 * 60 * 1000, open: 99.5, high: 102, low: 99, close: 100.25 });
+  const result = findHourlySweep(bars, 'bullish', start);
+  assert.ok(result);
+  assert.equal(result.level, 100);
+  assert.equal(result.lookbackBars, 501);
+});
+
+test('first M5 entry checks the latest intrabar candle instead of re-signalling an old touch', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const oldTouch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
+  const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
+  const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, []);
+  assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), false);
+});
+
+test('second M5 entry reports the latest completed 0.618 sweep, not the oldest historical one', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const older = c('2026-11-10T05:00:00', 113, 115, 111, 113);
+  const newer = c('2026-11-10T05:05:00', 113, 116, 111, 114);
+  const entries = findM5Entries([older, newer], 'bullish', older.time, fib, [older, newer]);
+  const second = entries.find(e => e.type === 'SECOND_ENTRY');
+  assert.ok(second);
+  assert.equal(second.time, newer.time);
+});

@@ -1,6 +1,6 @@
 'use strict';
 
-const H1_LOOKBACK_BARS = 500;
+const H1_LOOKBACK_BARS = Number.POSITIVE_INFINITY;
 const DAILY_SWEEP_SCAN_BARS = 260;
 const EQ_LOOKBACK_BARS = 60;
 
@@ -275,7 +275,7 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
   const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
-  const first = bars.find(c => candleTouches(c, fib['0.5']));
+  const first = bars.length ? bars[bars.length - 1] : null;
   if (first) {
     const stop = fib['0.618'];
     const stopValid = side === 'bullish' ? stop < fib['0.5'] : stop > fib['0.5'];
@@ -286,9 +286,10 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
       reason: 'M5 range touched Fibonacci 0.5'
     });
   }
-  const second = closedBars.find(c => side === 'bullish'
+  const secondCandidates = closedBars.filter(c => side === 'bullish'
     ? c.low < fib['0.618'] && c.close > fib['0.618']
     : c.high > fib['0.618'] && c.close < fib['0.618']);
+  const second = secondCandidates.length ? secondCandidates[secondCandidates.length - 1] : null;
   if (second) {
     const stop = side === 'bullish' ? second.high : second.low;
     const entry = fib['0.618'];
