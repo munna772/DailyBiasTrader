@@ -279,6 +279,8 @@ async function refreshStrategy(){
       throw new Error(error);
     }
     const s = payload.strategy || {};
+    const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
+    const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
     el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
@@ -286,8 +288,6 @@ async function refreshStrategy(){
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
     el('entryDetail').textContent = dataStale && s.h1Status === 'CONFIRMED' ? 'No fresh M5 data; entry signals are paused' : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
-    const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
-    const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     setMetric('dataStatus', dataStale ? 'STALE' : 'CONNECTED', dataStale ? 'bad' : 'good');
     const freshnessText = freshness.latestCandleAt
       ? 'M5 ' + formatTime(freshness.latestCandleAt) + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
