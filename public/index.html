@@ -304,7 +304,6 @@ async function refreshStrategy(){
     el('riskWarning').classList.toggle('hidden', !s.riskWarning);
     renderFib(s.fib);
     renderEntries(s.entries);
-    setFeedStatus('STRATEGY FEED LIVE', true);
   }catch(error){
     const message = error && error.name === 'TimeoutError'
       ? 'Strategy service took too long to respond. A free Render service may be waking up; retry shortly.'
@@ -314,10 +313,8 @@ async function refreshStrategy(){
     el('dataDetail').textContent = 'No live OHLC received';
     if(/key is not configured/i.test(message)){
       el('providerNote').textContent = 'The API server is deployed, but TWELVEDATA_API_KEY has not been configured. Add a Twelve Data key with commodity market access in Render to enable live strategy calculations.';
-      setFeedStatus('API KEY NEEDED',false);
     }else{
       el('providerNote').textContent = 'Strategy feed unavailable. The app will not invent candles or signals.';
-      setFeedStatus('STRATEGY FEED ERROR',false);
     }
     setMetric('bias','NO DATA','bad');
     setMetric('h1','NO DATA','bad');
