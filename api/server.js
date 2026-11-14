@@ -5,14 +5,14 @@ const { URL } = require('node:url');
 const { analyzeStrategy, normalizeCandles } = require('./strategy');
 
 const PORT = Number(process.env.PORT || 10000);
-const API_KEY = process.env.TWELVEDATA_API_KEY || '';
-const PROVIDER = 'Twelve Data';
+const API_KEY = process.env.DAILY_BIAS_TRADER || process.env.SIFTING_API_KEY || '';
+const PROVIDER = 'SiftingIO';
 const SYMBOLS = Object.freeze({
-  XAUUSD: 'XAU/USD',
-  XAGUSD: 'XAG/USD',
-  USOIL: 'WTI/USD'
+  XAUUSD: 'XAUUSD',
+  XAGUSD: 'XAGUSD',
+  USOIL: 'WTIUSD'
 });
-const CACHE_TTL_MS = 60000;
+const CACHE_TTL_MS = 120000;
 const cache = new Map();
 const rateBuckets = new Map();
 const allowedOrigins = new Set([
@@ -58,57 +58,54 @@ function allowRate(req) {
   return bucket.count <= 30;
 }
 
-function parseTwelveData(response) {
-  if (!response || !Array.isArray(response.values)) {
-    const providerMessage = response && typeof response.message === 'string' ? response.message : '';
-    if (/apikey|api key|credits|plan|permission|access|symbol/i.test(providerMessage)) {
-      throw new Error('Twelve Data rejected the API key or this account does not have access to the requested commodity feed.');
+function parseSiftingBars(response) {
+  if (!response || !Array.isArray(response.data)) {
+    const message = response && (response.message || response.error);
+    if (/api.?key|auth|permission|plan|subscription|access/i.test(String(message || ''))) {
+      throw new Error('SiftingIO rejected the API key or this account does not have access to the commodities feed.');
     }
-    throw new Error(providerMessage || 'The market-data provider returned no candle array.');
+    throw new Error(String(message || 'SiftingIO returned no candle array.'));
   }
-  const candles = response.values.map(value => ({
-    time: value.datetime,
-    open: Number(value.open),
-    high: Number(value.high),
-    low: Number(value.low),
-    close: Number(value.close),
-    volume: Number(value.volume || 0)
-  }));
-  return normalizeCandles(candles);
+  return normalizeCandles(response.data.map(bar => ({
+    time: Number(bar.t),
+    open: Number(bar.o),
+    high: Number(bar.h),
+    low: Number(bar.l),
+    close: Number(bar.c),
+    volume: Number(bar.v || 0)
+  })));
 }
 
 async function fetchSeries(symbol, interval, outputsize) {
-  const url = new URL('https://api.twelvedata.com/time_series');
-  url.searchParams.set('symbol', symbol);
+  const now = Date.now();
+  const intervalMs = interval === '1d' ? 86400000 : interval === '1h' ? 3600000 : 300000;
+  const start = new Date(now - outputsize * intervalMs).toISOString();
+  const url = new URL('https://api.sifting.io/v1/hist/commodities/' + encodeURIComponent(symbol) + '/bars');
   url.searchParams.set('interval', interval);
-  url.searchParams.set('outputsize', String(outputsize));
-  url.searchParams.set('timezone', 'UTC');
-  url.searchParams.set('format', 'JSON');
-  url.searchParams.set('apikey', API_KEY);
+  url.searchParams.set('start', start);
+  url.searchParams.set('end', new Date(now).toISOString());
+  url.searchParams.set('limit', String(outputsize));
 
   let response;
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { Accept: 'application/json' } });
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(20000),
+      headers: { Accept: 'application/json', 'X-API-Key': API_KEY }
+    });
   } catch (error) {
-    throw new Error(error && error.name === 'TimeoutError' ? 'The market-data provider timed out.' : 'Could not connect to the market-data provider.');
+    throw new Error(error && error.name === 'TimeoutError' ? 'SiftingIO market-data request timed out.' : 'Could not connect to SiftingIO.');
   }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error('Twelve Data rejected the API key or the account plan does not include this feed.');
+      throw new Error('SiftingIO rejected the API key or this account does not have access to commodities data.');
     }
-    if (response.status === 429) throw new Error('Twelve Data request limit reached. Wait before refreshing.');
-    throw new Error('Twelve Data returned HTTP ' + response.status + '.');
+    if (response.status === 406) throw new Error('SiftingIO requires gzip-compressed historical bars. Check the server runtime and request headers.');
+    if (response.status === 429) throw new Error('SiftingIO request limit reached. Wait before refreshing.');
+    const detail = await response.text().catch(() => '');
+    throw new Error('SiftingIO returned HTTP ' + response.status + (detail ? ': ' + detail.slice(0, 180) : '.'));
   }
   const json = await response.json();
-  if (json && json.status === 'error') {
-    const message = typeof json.message === 'string' ? json.message : '';
-    if (/apikey|api key|credits|plan|permission|access|symbol/i.test(message)) {
-      throw new Error('Twelve Data rejected the API key or this account does not have access to the requested commodity feed.');
-    }
-    if (/limit|credit|call/i.test(message)) throw new Error('Twelve Data request limit reached. Wait before refreshing.');
-    throw new Error(message || 'Twelve Data could not provide this instrument.');
-  }
-  return parseTwelveData(json);
+  return parseSiftingBars(json);
 }
 
 function completedOnly(bars, durationMs, now) {
@@ -117,7 +114,7 @@ function completedOnly(bars, durationMs, now) {
 
 async function loadMarket(symbolKey) {
   if (!API_KEY) {
-    const error = new Error('Market-data API key is not configured on the server.');
+    const error = new Error('SiftingIO API key is not configured. Set DAILY_BIAS_TRADER in Render.');
     error.statusCode = 503;
     throw error;
   }
@@ -126,16 +123,16 @@ async function loadMarket(symbolKey) {
 
   const providerSymbol = SYMBOLS[symbolKey];
   const [dailyRaw, hourlyRaw, fiveMinuteRaw] = await Promise.all([
-    fetchSeries(providerSymbol, '1day', 350),
+    fetchSeries(providerSymbol, '1d', 350),
     fetchSeries(providerSymbol, '1h', 1000),
-    fetchSeries(providerSymbol, '5min', 500)
+    fetchSeries(providerSymbol, '5m', 500)
   ]);
   const incomplete = [];
   if (dailyRaw.length < 8) incomplete.push('D1=' + dailyRaw.length + ' (need at least 8)');
   if (hourlyRaw.length < 2) incomplete.push('H1=' + hourlyRaw.length + ' (need at least 2)');
   if (fiveMinuteRaw.length < 10) incomplete.push('M5=' + fiveMinuteRaw.length + ' (need at least 10)');
   if (incomplete.length) {
-    const error = new Error('Twelve Data returned incomplete OHLC history: ' + incomplete.join(', ') + '. Check the market symbol and account data access.');
+    const error = new Error('SiftingIO returned incomplete OHLC history: ' + incomplete.join(', ') + '. Check instrument coverage and interval access.');
     error.statusCode = 502;
     throw error;
   }
