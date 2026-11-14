@@ -1,11 +1,19 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
 }
+
+test('browser UI and Android APK UI stay identical', () => {
+  const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
+  assert.equal(androidUi, browserUi);
+});
 
 test('recognizes a low-level rejection as a bullish liquidity sweep', () => {
   const result = findSweep(c('2026-11-10T00:00:00', 102, 108, 95, 105), { lows: [{ price: 100, name: 'PDL' }], highs: [] });
