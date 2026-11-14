@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'api/**'
+      - 'public/**'
+      - 'app/src/main/assets/**'
       - '.github/workflows/strategy-tests.yml'
   pull_request:
     paths:
