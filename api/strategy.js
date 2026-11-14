@@ -281,7 +281,7 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
     const stopValid = side === 'bullish' ? stop < fib['0.5'] : stop > fib['0.5'];
     entries.push({
       type: 'FIRST_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: first.time, entry: fib['0.5'], stopLoss: stop, takeProfit: fib['0'],
+      time: first.time, entry: fib['0.5'], stopLoss: stop, takeProfit: fib['1'],
       stopValid, status: stopValid ? 'SETUP_DETECTED' : 'BLOCKED_INVALID_STOP_SIDE',
       reason: 'M5 range touched Fibonacci 0.5'
     });
