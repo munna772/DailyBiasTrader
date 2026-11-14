@@ -37,6 +37,7 @@ The TradingView chart is a separate display feed and may not have identical cand
 - M5 second entry: a completed M5 candle sweeps Fib 0.618 and closes back across it. Entry is at that candle close; BUY stop is that candle's low and SELL stop is its high; target Fib 0.
 - The maximum 4-pip ($0.40 quoted-price) stop-distance restriction applies only to Gold (XAUUSD) second entries. Silver (XAGUSD) and USOIL do not inherit this cap.
 - Risk validation checks stop-loss side, target side and the Gold-only distance restriction. Blocked levels remain visible for review; the app does not send orders or guarantee that a setup is profitable.
+- M5 data is considered stale when the latest candle has been closed for more than 15 minutes. While stale, the app displays a freshness warning and suppresses M5 entry signals rather than replaying old candles. Stale data may mean the market is closed or the provider is delayed; it is not treated as proof of an API failure.
 
 ## Development
 
