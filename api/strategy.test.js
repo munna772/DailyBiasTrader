@@ -42,7 +42,7 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
   const bars = [
     c('2026-11-10T01:00:00', 110, 112, 100, 108),
     c('2026-11-10T02:00:00', 108, 110, 104, 106),
-    c('2026-11-10T03:00:00', 106, 109, 103, 107),
+    c('2026-11-10T03:00:00', 106, 109, 103, 103),
     c('2026-11-10T04:00:00', 105, 108, 98, 105)
   ];
   const result = findHourlySweep(bars, 'bullish', bars[0].time);
