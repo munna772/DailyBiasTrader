@@ -48,7 +48,7 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
   const result = findHourlySweep(bars, 'bullish', bars[0].time);
   assert.ok(result);
   assert.equal(result.level, 104);
-  assert.equal(result.time, bars[3].time);
+  assert.equal(result.time, bars[3].time + 60 * 60 * 1000);
 });
 
 test('second entry preserves the specified candle-high stop for BUY and blocks its wrong side', () => {
@@ -75,4 +75,20 @@ test('recognizes the three-candle inside pattern in both directions', () => {
   ];
   assert.equal(isInsideThreeBullish(bullish, 2), true);
   assert.equal(isInsideThreeBearish(bearish, 2), true);
+});
+
+
+test('first M5 entry may trigger on the current intrabar candle', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const current = c('2026-11-10T05:00:00', 109, 111, 108, 109);
+  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
+  assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), true);
+  assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
+});
+
+test('second M5 entry requires a completed sweep-and-close candle', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const current = c('2026-11-10T05:00:00', 113, 115, 111, 113);
+  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
+  assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
 });
