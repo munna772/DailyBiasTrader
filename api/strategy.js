@@ -296,7 +296,7 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
     const stopValid = side === 'bullish' ? stop < entry : stop > entry;
     entries.push({
       type: 'SECOND_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: second.time, entry, stopLoss: stop, takeProfit: fib['1'],
+      time: second.time, entry, stopLoss: stop, takeProfit: fib['0'],
       stopValid, status: stopValid ? 'SETUP_DETECTED' : 'BLOCKED_INVALID_STOP_SIDE',
       reason: 'M5 swept Fibonacci 0.618 and closed back across it'
     });
