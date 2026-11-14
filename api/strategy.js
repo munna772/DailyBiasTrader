@@ -214,7 +214,7 @@ function findDailyBias(rawBars) {
   }
   const latestEvent = latestEvents[0];
   let confirmation = null;
-  for (let i = latestEvent.index; i < bars.length; i++) {
+  for (let i = latestEvent.index + 1; i < bars.length; i++) {
     const pattern = dailyConfirmation(bars, i, latestEvent.side);
     if (pattern) {
       confirmation = { pattern, time: bars[i].time + 24 * 60 * 60 * 1000, candleTime: bars[i].time, index: i };
@@ -276,44 +276,67 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
   const first = bars.length ? bars[bars.length - 1] : null;
+
   if (first && candleTouches(first, fib['0.5'])) {
+    const entry = fib['0.5'];
     const stop = fib['0.618'];
-    const stopValid = side === 'bullish' ? stop < fib['0.5'] : stop > fib['0.5'];
+    const takeProfit = fib['0'];
+    const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
+    const takeProfitValid = side === 'bullish' ? takeProfit > entry : takeProfit < entry;
+    const setupValid = stopSideValid && takeProfitValid;
+    const status = !stopSideValid
+      ? 'BLOCKED_INVALID_STOP_SIDE'
+      : !takeProfitValid
+        ? 'BLOCKED_INVALID_TARGET_SIDE'
+        : 'SETUP_DETECTED';
     entries.push({
       type: 'FIRST_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: first.time, entry: fib['0.5'], stopLoss: stop, takeProfit: fib['0'],
-      stopValid, status: stopValid ? 'SETUP_DETECTED' : 'BLOCKED_INVALID_STOP_SIDE',
-      reason: 'M5 range touched Fibonacci 0.5'
+      time: first.time, entry, stopLoss: stop, takeProfit,
+      stopSideValid, stopValid: stopSideValid, takeProfitValid, setupValid, status,
+      reason: !stopSideValid
+        ? 'Fib 0.618 stop is on the wrong side of the 0.5 entry'
+        : !takeProfitValid
+          ? 'Fib 0 target is not beyond the entry in the trade direction'
+          : 'M5 range touched Fibonacci 0.5'
     });
   }
+
   const secondCandidates = closedBars.filter(c => side === 'bullish'
     ? c.low < fib['0.618'] && c.close > fib['0.618']
     : c.high > fib['0.618'] && c.close < fib['0.618']);
   const second = secondCandidates.length ? secondCandidates[secondCandidates.length - 1] : null;
+
   if (second) {
     const stop = side === 'bullish' ? second.low : second.high;
     const entry = second.close;
+    const takeProfit = fib['0'];
     const stopDistance = Math.abs(entry - stop);
     const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
-    // The 4-pip Gold rule is represented as a $0.40 quoted-price distance.
+    const takeProfitValid = side === 'bullish' ? takeProfit > entry : takeProfit < entry;
+    // The Gold-only 4-pip rule is represented as a $0.40 quoted-price distance.
     // Silver and USOIL do not inherit this cap.
     const maxStopDistance = String(symbol || '').toUpperCase() === 'XAUUSD' ? 0.40 : null;
     const withinStopLimit = maxStopDistance === null || stopDistance <= maxStopDistance + 1e-10;
     const stopValid = stopSideValid && withinStopLimit;
+    const setupValid = stopValid && takeProfitValid;
     const status = !stopSideValid
       ? 'BLOCKED_INVALID_STOP_SIDE'
-      : !withinStopLimit
-        ? 'BLOCKED_STOP_TOO_WIDE'
-        : 'SETUP_DETECTED';
+      : !takeProfitValid
+        ? 'BLOCKED_INVALID_TARGET_SIDE'
+        : !withinStopLimit
+          ? 'BLOCKED_STOP_TOO_WIDE'
+          : 'SETUP_DETECTED';
     entries.push({
       type: 'SECOND_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: second.time, entry, stopLoss: stop, takeProfit: fib['0'],
-      stopDistance, maxStopDistance, stopSideValid, stopValid, status,
+      time: second.time, entry, stopLoss: stop, takeProfit,
+      stopDistance, maxStopDistance, stopSideValid, stopValid, takeProfitValid, setupValid, status,
       reason: !stopSideValid
         ? 'Sweep candle wick stop is on the wrong side of the entry'
-        : !withinStopLimit
-          ? 'Gold second-entry stop exceeds the 4-pip ($0.40) maximum'
-          : 'M5 swept Fibonacci 0.618, closed back across it, and entry is at the candle close'
+        : !takeProfitValid
+          ? 'Fib 0 target is not beyond the entry in the trade direction'
+          : !withinStopLimit
+            ? 'Gold second-entry stop exceeds the 4-pip ($0.40) maximum'
+            : 'M5 swept Fibonacci 0.618, closed back across it, and entry is at the candle close'
     });
   }
   return entries.sort((a, b) => a.time - b.time);
@@ -332,14 +355,27 @@ function analyzeStrategy(input) {
   }
   const fib = calculateFib(h1Sweep.candle, side);
   const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5, input.symbol);
-  const blocked = entries.some(entry => !entry.stopValid);
+  const blockedEntries = entries.filter(entry => !entry.setupValid);
+  const blocked = blockedEntries.length > 0;
+  const riskIssues = [];
+  if (blockedEntries.some(entry => !entry.stopSideValid)) {
+    riskIssues.push('a stop-loss is on the wrong side of its entry');
+  }
+  if (blockedEntries.some(entry => !entry.takeProfitValid)) {
+    riskIssues.push('the Fib 0 target is not beyond the entry in the trade direction');
+  }
+  if (blockedEntries.some(entry => entry.status === 'BLOCKED_STOP_TOO_WIDE')) {
+    riskIssues.push('a Gold second-entry stop exceeds the 4-pip ($0.40 quoted-price) maximum');
+  }
   return {
     bias: daily.bias, biasReason: daily.reason, h1Status: 'CONFIRMED',
-    entryStatus: entries.length ? (blocked ? 'SETUP_BLOCKED_BY_STOP_RULE' : 'ENTRY_DETECTED') : 'WAITING_FOR_M5',
+    entryStatus: entries.length ? (blocked ? 'SETUP_BLOCKED_BY_RISK_RULE' : 'ENTRY_DETECTED') : 'WAITING_FOR_M5',
     daily,
     h1Sweep: { level: h1Sweep.level, time: h1Sweep.time, candle: h1Sweep.candle, lookbackBars: h1Sweep.lookbackBars },
     fib, entries,
-    riskWarning: blocked ? 'The configured stop-loss is on the wrong side of the entry for at least one detected setup. The requested stop rule is preserved, but the setup is blocked and must not be treated as a trade.' : null,
+    riskWarning: blocked
+      ? 'Risk validation blocked ' + blockedEntries.length + ' detected setup(s): ' + riskIssues.join('; ') + '. Requested levels are preserved; blocked setups must not be treated as executable trades.'
+      : null,
     data: { d1: d1.length, h1: h1.length, m5: m5.length }
   };
 }
