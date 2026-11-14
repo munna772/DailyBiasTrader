@@ -116,8 +116,8 @@ test('D1 confirmation must occur after the liquidity-sweep candle', () => {
 });
 
 test('second entry is blocked when Fib 0 target is already behind the entry', () => {
-  const fib = { '0': 107, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107.8, 109, 106, 108)];
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const bars = [c('2026-11-10T05:00:00', 121, 130, 106, 125)];
   const second = findM5Entries(bars, 'bullish', bars[0].time, fib)
     .find(entry => entry.type === 'SECOND_ENTRY');
   assert.ok(second);
