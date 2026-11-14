@@ -207,7 +207,12 @@ function findDailyBias(rawBars) {
   }
   if (!events.length) return { bias: 'WAITING', reason: 'No qualifying D1 liquidity sweep found', sweep: null, confirmation: null };
   events.sort((a, b) => a.index - b.index);
-  const latestEvent = events[events.length - 1];
+  const latestIndex = events[events.length - 1].index;
+  const latestEvents = events.filter(event => event.index === latestIndex);
+  if (latestEvents.length > 1) {
+    return { bias: 'WAITING', reason: 'Latest D1 candle swept both sides; directional bias is ambiguous', sweep: null, confirmation: null };
+  }
+  const latestEvent = latestEvents[0];
   let confirmation = null;
   for (let i = latestEvent.index; i < bars.length; i++) {
     const pattern = dailyConfirmation(bars, i, latestEvent.side);
@@ -230,7 +235,9 @@ function findDailyBias(rawBars) {
 function findHourlySweep(rawBars, side, afterTime, lookback = H1_LOOKBACK_BARS) {
   const bars = normalizeCandles(rawBars);
   if (bars.length < 2) return null;
-  const startAt = Math.max(1, bars.findIndex(c => c.time >= afterTime));
+  const foundAt = bars.findIndex(c => c.time >= afterTime);
+  if (foundAt < 0) return null;
+  const startAt = Math.max(1, foundAt);
   if (startAt >= bars.length) return null;
   for (let i = startAt; i < bars.length; i++) {
     const current = bars[i];
