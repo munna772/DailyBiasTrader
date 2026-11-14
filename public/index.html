@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>DailyBiasTrader</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#080d18;--panel:#101a2b;--line:#1e2d43;--muted:#8292aa;--cyan:#39d9d0;--green:#38d996;--red:#ff647c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eef4ff;font:14px system-ui,Arial}
+header{padding:17px 16px 12px;display:flex;justify-content:space-between;align-items:center}
+.brand{font-size:18px;font-weight:800;letter-spacing:.4px}.brand span{color:var(--cyan)}.status{font-size:10px;color:#ffce73;border:1px solid #755b2d;border-radius:20px;padding:5px 8px}
+main{padding:0 12px 24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px}
+.row{display:flex;gap:7px;align-items:center;justify-content:space-between}.chips{display:flex;gap:6px;flex-wrap:wrap}
+button,select{background:#17243a;color:#dce8fb;border:1px solid #2b3c56;border-radius:9px;padding:9px 11px;font-weight:650;font-size:12px}
+button.active{background:#123d47;border-color:var(--cyan);color:#7cf4e8}
+select{font-size:13px}.symbol{font-size:19px;font-weight:800}.sub{color:var(--muted);font-size:11px;margin-top:3px}
+#chart{height:310px;width:100%;position:relative}.chart-wrap{padding:6px 0 0}.toolrow{margin-top:8px}.toolrow button{padding:8px 9px}
+.section-title{font-size:12px;color:#9eb0c9;font-weight:750;letter-spacing:1px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.metric{background:#0b1423;border:1px solid #1b2b41;border-radius:10px;padding:10px}.metric b{display:block;font-size:13px;margin-top:5px}.metric small{color:var(--muted);font-size:10px}
+.wait{color:#ffd27b;font-weight:800}.notice{font-size:11px;line-height:1.5;color:#a9b8cc}.levels{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1b2a3d;font-size:12px}.levels:last-child{border:0}
+footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
+</style>
+</head>
+<body>
+<header><div class="brand">DAILY<span>BIAS</span> TRADER<div class="sub">MULTI-MARKET STRATEGY DESK</div></div><div class="status">DEMO DATA</div></header>
+<main>
+<section class="panel">
+ <div class="row"><div><div class="sub">MARKET</div><div class="symbol" id="symbolLabel">XAUUSD</div></div>
+ <select id="symbol"><option>XAUUSD</option><option>USOIL</option><option>XAGUSD</option></select></div>
+ <div class="chips" style="margin-top:13px" id="timeframes"><button data-tf="D1" class="active">D1</button><button data-tf="H1">H1</button><button data-tf="M5">M5</button></div>
+ <div class="chart-wrap"><div id="chart"></div></div>
+ <div class="chips toolrow" id="tools"><button data-tool="cross" class="active">Cross</button><button data-tool="hline">H-Line</button><button data-tool="trend">Trend</button><button data-tool="zone">Zone</button><button data-tool="fib">Fib</button><button id="clear">Clear</button></div>
+ <div class="sub" style="margin-top:8px">Tap chart to place drawings. Trend/zone use two taps. Fib draws 0 / 0.5 / 0.618 / 1.</div>
+</section>
+<section class="panel">
+ <div class="section-title">STRATEGY STATUS</div>
+ <div class="grid">
+  <div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING</b></div>
+  <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">NOT CHECKED</b></div>
+  <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">DISABLED</b></div>
+  <div class="metric"><small>MARKET DATA</small><b class="wait">DEMO ONLY</b></div>
+ </div>
+ <p class="notice">Live signals are disabled. The chart currently uses illustrative demo candles, not a live TradingView feed. Connect a properly licensed data provider before relying on strategy calculations.</p>
+</section>
+<section class="panel">
+ <div class="section-title">FIBONACCI REFERENCE</div>
+ <div class="levels"><span>1.000</span><b>100% — swing end</b></div>
+ <div class="levels"><span>0.618</span><b>61.8% — retracement</b></div>
+ <div class="levels"><span>0.500</span><b>50% — first entry level</b></div>
+ <div class="levels"><span>0.000</span><b>0% — sweep origin</b></div>
+</section>
+<section class="panel">
+ <div class="section-title">RULE ENGINE — CONFIGURED RULES</div>
+ <p class="notice">D1 liquidity levels: PDH/PDL, PWH/PWL, PMH/PML, EQH/EQL and major swing highs/lows. A sweep must pierce the level and close back inside. D1 bias requires the matching confirmation pattern. H1 then searches for a matching earlier-candle sweep. Fib is drawn across the full H1 sweep candle range.</p>
+ <p class="notice">M5 first entry: touch 0.5; requested SL 0.618 and TP 1. Second entry: sweep 0.618 and close back inside; requested candle-extreme stop and TP 1. Some requested stop placements may be on the wrong side of the trade. Live signals remain disabled pending validation and backtesting.</p>
+</section>
+<footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
+</main>
+<script>
+(function(){
+ const chartEl=document.getElementById('chart');
+ const chart=LightweightCharts.createChart(chartEl,{width:chartEl.clientWidth,height:310,layout:{background:{color:'#101a2b'},textColor:'#9aabc2'},grid:{vertLines:{color:'#17253a'},horzLines:{color:'#17253a'}},rightPriceScale:{borderColor:'#26364d'},timeScale:{borderColor:'#26364d',timeVisible:true},crosshair:{mode:0}});
+ const candles=chart.addCandlestickSeries({upColor:'#38d996',downColor:'#ff647c',borderUpColor:'#38d996',borderDownColor:'#ff647c',wickUpColor:'#38d996',wickDownColor:'#ff647c'});
+ let tf='D1',symbol='XAUUSD',tool='cross',pending=null,drawings=[];
+ function makeData(){
+  let now=Math.floor(Date.now()/1000),step=tf==='D1'?86400:tf==='H1'?3600:300,base=symbol==='XAUUSD'?2350:symbol==='USOIL'?72:29,arr=[];
+  for(let i=75;i>=0;i--){let c=base+Math.sin(i*.31)*base*.002+(Math.sin(i*.09)*base*.003);let o=c+(Math.sin(i*1.7)*base*.001);let h=Math.max(o,c)+base*.0009;let l=Math.min(o,c)-base*.0009;arr.push({time:Math.floor((now-i*step)/step)*step,open:o,high:h,low:l,close:c});}
+  return arr;
+ }
+ function refresh(){candles.setData(makeData());chart.timeScale().fitContent();document.getElementById('symbolLabel').textContent=symbol;drawings=[];pending=null;drawOverlay();}
+ function drawOverlay(){
+  let old=chartEl.querySelector('canvas.drawlayer');if(old)old.remove();
+  let canvas=document.createElement('canvas');canvas.className='drawlayer';canvas.width=chartEl.clientWidth*devicePixelRatio;canvas.height=chartEl.clientHeight*devicePixelRatio;canvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none';chartEl.appendChild(canvas);
+  let ctx=canvas.getContext('2d');ctx.scale(devicePixelRatio,devicePixelRatio);ctx.lineWidth=1.5;ctx.strokeStyle='#39d9d0';ctx.fillStyle='rgba(57,217,208,.12)';
+  drawings.forEach(d=>{ctx.beginPath();if(d.type==='hline'){ctx.moveTo(0,d.y);ctx.lineTo(chartEl.clientWidth,d.y)}else if(d.type==='trend'||d.type==='fib'){ctx.moveTo(d.x,d.y);ctx.lineTo(d.x2,d.y2);if(d.type==='fib'){for(let f of [0,.5,.618,1]){let y=d.y+(d.y2-d.y)*f;ctx.moveTo(0,y);ctx.lineTo(chartEl.clientWidth,y);ctx.fillText(f.toFixed(3),5,y-3)}}}else if(d.type==='zone'){ctx.rect(Math.min(d.x,d.x2),Math.min(d.y,d.y2),Math.abs(d.x2-d.x),Math.abs(d.y2-d.y));ctx.fill()}ctx.stroke()});
+ }
+ chartEl.addEventListener('click',e=>{
+  if(tool==='cross')return;let r=chartEl.getBoundingClientRect(),p={x:e.clientX-r.left,y:e.clientY-r.top};
+  if(tool==='hline'){drawings.push({type:'hline',y:p.y});}
+  else if(!pending){pending=p;return}
+  else{drawings.push({type:tool,x:pending.x,y:pending.y,x2:p.x,y2:p.y});pending=null}
+  drawOverlay();
+ });
+ document.querySelectorAll('#tools button[data-tool]').forEach(b=>b.onclick=()=>{tool=b.dataset.tool;document.querySelectorAll('#tools button').forEach(x=>x.classList.toggle('active',x===b))});
+ document.getElementById('clear').onclick=()=>{drawings=[];pending=null;drawOverlay()};
+ document.getElementById('symbol').onchange=e=>{symbol=e.target.value;refresh()};
+ document.querySelectorAll('#timeframes button').forEach(b=>b.onclick=()=>{tf=b.dataset.tf;document.querySelectorAll('#timeframes button').forEach(x=>x.classList.toggle('active',x===b));refresh()});
+ new ResizeObserver(()=>{chart.applyOptions({width:chartEl.clientWidth});drawOverlay()}).observe(chartEl);
+ refresh();
+})();
+</script>
+</body></html>
