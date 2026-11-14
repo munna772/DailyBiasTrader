@@ -53,8 +53,8 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
 });
 
 test('second entry preserves the specified candle-high stop for BUY and blocks its wrong side', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
-  const bars = [c('2026-11-10T05:00:00', 113, 115, 111, 113)];
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const bars = [c('2026-11-10T05:00:00', 108, 115, 106, 108)];
   const entries = findM5Entries(bars, 'bullish', bars[0].time, fib);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
@@ -80,7 +80,7 @@ test('recognizes the three-candle inside pattern in both directions', () => {
 
 
 test('first M5 entry may trigger on the current intrabar candle', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const entries = findM5Entries([current], 'bullish', current.time, fib, []);
   assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), true);
@@ -88,7 +88,7 @@ test('first M5 entry may trigger on the current intrabar candle', () => {
 });
 
 test('second M5 entry requires a completed sweep-and-close candle', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T05:00:00', 113, 115, 111, 113);
   const entries = findM5Entries([current], 'bullish', current.time, fib, []);
   assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
@@ -109,7 +109,7 @@ test('H1 sweep searches the full available history, including bars older than 50
 });
 
 test('first M5 entry checks the latest intrabar candle instead of re-signalling an old touch', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const oldTouch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
   const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, []);
@@ -117,11 +117,34 @@ test('first M5 entry checks the latest intrabar candle instead of re-signalling 
 });
 
 test('second M5 entry reports the latest completed 0.618 sweep, not the oldest historical one', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const older = c('2026-11-10T05:00:00', 113, 115, 111, 113);
-  const newer = c('2026-11-10T05:05:00', 113, 116, 111, 114);
+  const newer = c('2026-11-10T05:05:00', 108, 116, 106, 109);
   const entries = findM5Entries([older, newer], 'bullish', older.time, fib, [older, newer]);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
   assert.equal(second.time, newer.time);
+});
+
+
+test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const current = c('2026-11-10T06:00:00', 109, 111, 108, 109);
+  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
+  const first = entries.find(e => e.type === 'FIRST_ENTRY');
+  assert.ok(first);
+  assert.equal(first.stopLoss, 107.64);
+  assert.equal(first.takeProfit, 120);
+  assert.equal(first.stopValid, true);
+});
+
+test('first SELL entry uses 0.618 above entry as stop and 0 as target', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const current = c('2026-11-10T06:00:00', 111, 112, 109, 111);
+  const entries = findM5Entries([current], 'bearish', current.time, fib, []);
+  const first = entries.find(e => e.type === 'FIRST_ENTRY');
+  assert.ok(first);
+  assert.equal(first.stopLoss, 112.36);
+  assert.equal(first.takeProfit, 100);
+  assert.equal(first.stopValid, true);
 });
