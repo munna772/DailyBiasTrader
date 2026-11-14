@@ -50,7 +50,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 <body>
 <header>
   <div class="brand">DAILY<span>BIAS</span> TRADER<div class="sub">MULTI-MARKET STRATEGY DESK</div></div>
-  <div class="status" id="feedStatus">CHECKING FEED</div>
+  <div class="status" id="chartStatus">CHECKING CHART</div>
 </header>
 <main>
 <section class="panel">
@@ -114,10 +114,10 @@ let strategyBusy = false;
 
 const el = id => document.getElementById(id);
 function clearElement(node){ while(node.firstChild) node.removeChild(node.firstChild); }
-function setFeedStatus(text, good){
-  el('feedStatus').textContent = text;
-  el('feedStatus').style.color = good ? '#7cf4bb' : '#ffd27b';
-  el('feedStatus').style.borderColor = good ? '#286c52' : '#80612a';
+function setChartStatus(text, good){
+  el('chartStatus').textContent = text;
+  el('chartStatus').style.color = good ? '#7cf4bb' : '#ffd27b';
+  el('chartStatus').style.borderColor = good ? '#286c52' : '#80612a';
 }
 function showChartMessage(text, visible){
   el('chartMessage').textContent = text;
@@ -125,7 +125,7 @@ function showChartMessage(text, visible){
 }
 function showChartFailure(text){
   showChartMessage(text, true);
-  setFeedStatus('CHART ERROR', false);
+  setChartStatus('CHART ERROR', false);
 }
 function renderChart(){
   const generation = ++chartGeneration;
@@ -133,7 +133,7 @@ function renderChart(){
   const host = el('tv_chart');
   clearElement(host);
   showChartMessage('Opening TradingView chart…', true);
-  setFeedStatus('LOADING CHART', false);
+  setChartStatus('LOADING CHART', false);
 
   // Use TradingView's isolated iframe endpoint. Do not dynamically inject
   // their script: their own FAQ warns that dynamically injected widget
@@ -183,7 +183,7 @@ function renderChart(){
     showChartMessage('', false);
     // Cross-origin iframe isolation means this confirms the frame loaded,
     // not that the selected exchange supplied real-time data.
-    setFeedStatus('CHART FRAME LOADED', true);
+    setChartStatus('CHART FRAME LOADED', true);
   }, {once:true});
   frame.addEventListener('error', function(){
     if(generation !== chartGeneration) return;
@@ -285,11 +285,19 @@ async function refreshStrategy(){
     el('h1Detail').textContent = s.h1Sweep ? 'Sweep candle: ' + formatTime(s.h1Sweep.time) : 'Requires matching H1 sweep after D1';
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
-    el('entryDetail').textContent = s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions';
-    setMetric('dataStatus','CONNECTED','good');
-    el('dataDetail').textContent = 'D1 ' + payload.candles.d1 + ' • H1 ' + payload.candles.h1 + ' • M5 ' + payload.candles.m5;
-    el('providerNote').textContent = 'Strategy candles: ' + payload.source + ' (' + payload.providerSymbol + '). Chart candles remain sourced independently from TradingView.';
+    el('entryDetail').textContent = dataStale && s.h1Status === 'CONFIRMED' ? 'No fresh M5 data; entry signals are paused' : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
+    const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
+    const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
+    setMetric('dataStatus', dataStale ? 'STALE' : 'CONNECTED', dataStale ? 'bad' : 'good');
+    const freshnessText = freshness.latestCandleAt
+      ? 'M5 ' + formatTime(freshness.latestCandleAt) + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
+      : 'No M5 timestamp available';
+    el('dataDetail').textContent = 'D1 ' + payload.candles.d1 + ' • H1 ' + payload.candles.h1 + ' • M5 ' + payload.candles.m5 + ' • ' + freshnessText;
+    el('providerNote').textContent = dataStale
+      ? 'SiftingIO returned historical candles, but the latest M5 data is stale. The market may be closed or the provider may be delayed; old entries are hidden. TradingView chart data is independent.'
+      : 'Strategy candles: ' + payload.source + ' (' + payload.providerSymbol + '). M5 data is recent. Chart candles remain sourced independently from TradingView.';
     el('updatedAt').textContent = 'Last API update: ' + formatTime(payload.fetchedAt) + ' Dhaka time';
+    if (dataStale) el('errorMessage').textContent = 'No recent M5 candle. The market may be closed or the provider data delayed; this is not by itself proof that the API is offline.';
     el('riskWarning').textContent = s.riskWarning || '';
     el('riskWarning').classList.toggle('hidden', !s.riskWarning);
     renderFib(s.fib);
