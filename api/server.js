@@ -90,7 +90,7 @@ async function fetchSeries(symbol, interval, outputsize) {
   try {
     response = await fetch(url, {
       signal: AbortSignal.timeout(20000),
-      headers: { Accept: 'application/json', 'X-API-Key': API_KEY }
+      headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip', 'X-API-Key': API_KEY }
     });
   } catch (error) {
     throw new Error(error && error.name === 'TimeoutError' ? 'SiftingIO market-data request timed out.' : 'Could not connect to SiftingIO.');
