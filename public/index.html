@@ -97,7 +97,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
   <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The implementation searches all earlier H1 candles returned by the market-data provider. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
-  <p class="notice">M5 first entry: touch of 0.5; requested SL 0.618 and TP 1. Second entry: sweep of 0.618 and close back across; requested BUY stop is the sweep candle high and SELL stop is its low; TP 1.</p>
+  <p class="notice">M5 first entry: touch of 0.5; requested SL 0.618 and TP 0. Second entry: sweep of 0.618 and close back across; requested BUY stop is the sweep candle high and SELL stop is its low; TP 0.</p>
   <p class="notice warn">Risk validation: the specified stop-loss levels are on the wrong side of the entry under the specified Fibonacci direction. The app preserves your requested levels but blocks those setups instead of presenting them as safe or executable trades.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
@@ -216,7 +216,7 @@ function renderFib(fib){
   const target = el('fibLevels');
   if(!fib){ target.innerHTML = '<div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div>'; return; }
   target.innerHTML = '';
-  [['1','100% — TP reference'],['0.618','61.8% — second entry / requested SL'],['0.5','50% — first entry'],['0','0% — sweep origin']].forEach(item => {
+  [['1','100% — H1 candle extreme'],['0.618','61.8% — second-entry trigger / requested SL'],['0.5','50% — first-entry trigger'],['0','0% — take-profit target / sweep origin']].forEach(item => {
     const row = document.createElement('div');
     row.className = 'levels';
     const name = document.createElement('span');
