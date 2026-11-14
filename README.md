@@ -31,10 +31,10 @@ Strategy endpoint: \`/api/strategy?symbol=XAUUSD\` (also \`USOIL\`, \`XAGUSD\`)
 - D1 liquidity sweeps: PDH/PDL, PWH/PWL, PMH/PML, EQH/EQL and confirmed major swing highs/lows.
 - A valid sweep must pierce a level and close back inside it.
 - D1 confirmation: close beyond the previous D1 high/low, directional engulfing/rejection/displacement, or the specified three-candle inside-bar pattern.
-- H1 confirmation: a matching sweep of an earlier H1 candle high/low after the D1 confirmation, searching up to 500 preceding H1 bars.
+- H1 confirmation: a matching sweep of an earlier H1 candle high/low after the D1 confirmation, searching all earlier bars in the provider's returned H1 history (up to the requested 1,000-bar response).
 - Fibonacci is anchored to the entire H1 sweep candle high-low range, with the user's bullish/bearish 0 and 1 mapping.
-- M5 first entry is an intrabar touch of 0.5.
-- M5 second entry requires a completed M5 candle to sweep 0.618 and close back across it.
+- M5 first entry is an intrabar touch of 0.5 on the latest/current M5 candle; old touches are not replayed as fresh entries.
+- M5 second entry requires a completed M5 candle to sweep 0.618 and close back across it; the most recent matching completed candle is reported.
 
 Requested stop-loss placements are preserved, but the engine marks a setup blocked when its stop is on the wrong side of entry. It does not send orders or guarantee that a setup is profitable.
 

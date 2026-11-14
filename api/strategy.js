@@ -276,7 +276,7 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
   const first = bars.length ? bars[bars.length - 1] : null;
-  if (first) {
+  if (first && candleTouches(first, fib['0.5'])) {
     const stop = fib['0.618'];
     const stopValid = side === 'bullish' ? stop < fib['0.5'] : stop > fib['0.5'];
     entries.push({
