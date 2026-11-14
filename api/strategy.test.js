@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -245,4 +245,46 @@ test('first SELL entry uses 0.618 above entry as stop and 0 as target', () => {
   assert.equal(first.stopLoss, 112.36);
   assert.equal(first.takeProfit, 100);
   assert.equal(first.stopValid, true);
+});
+
+
+test('M5 freshness is based on the latest candle close, not API fetch time', () => {
+  const now = Date.parse('2026-11-14T15:10:00Z');
+  const recent = [c('2026-11-14T15:00:00', 10, 11, 9, 10.5)];
+  const stale = [c('2026-11-14T14:30:00', 10, 11, 9, 10.5)];
+  const recentStatus = assessMarketDataFreshness(recent, now);
+  const staleStatus = assessMarketDataFreshness(stale, now);
+  assert.equal(recentStatus.status, 'FRESH');
+  assert.equal(recentStatus.stale, false);
+  assert.equal(recentStatus.ageMinutes, 5);
+  assert.equal(staleStatus.status, 'STALE');
+  assert.equal(staleStatus.stale, true);
+  assert.equal(staleStatus.ageMinutes, 35);
+});
+
+test('no M5 candles are reported as missing data', () => {
+  const result = assessMarketDataFreshness([], Date.parse('2026-11-14T15:10:00Z'));
+  assert.equal(result.status, 'NO_DATA');
+  assert.equal(result.stale, true);
+  assert.equal(result.latestCandleAt, null);
+});
+
+test('stale M5 candles cannot produce actionable entry signals', () => {
+  const strategy = {
+    h1Status: 'CONFIRMED',
+    entryStatus: 'ENTRY_DETECTED',
+    entries: [{ type: 'SECOND_ENTRY', setupValid: true }],
+    riskWarning: 'obsolete risk warning'
+  };
+  const gated = gateStrategyOnFreshness(strategy, { status: 'STALE', stale: true });
+  assert.equal(gated.entryStatus, 'WAITING_FOR_FRESH_M5_DATA');
+  assert.deepEqual(gated.entries, []);
+  assert.equal(gated.riskWarning, null);
+  assert.equal(strategy.entries.length, 1);
+});
+
+test('fresh M5 data preserves the strategy result unchanged', () => {
+  const strategy = { h1Status: 'CONFIRMED', entryStatus: 'ENTRY_DETECTED', entries: [{ type: 'FIRST_ENTRY' }] };
+  const result = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false });
+  assert.equal(result, strategy);
 });
