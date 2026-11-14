@@ -114,6 +114,7 @@ let chartGeneration = 0;
 let strategyBusy = false;
 
 const el = id => document.getElementById(id);
+function clearElement(node){ while(node.firstChild) node.removeChild(node.firstChild); }
 function setFeedStatus(text, good){
   el('feedStatus').textContent = text;
   el('feedStatus').style.color = good ? '#7cf4bb' : '#ffd27b';
@@ -132,7 +133,7 @@ function renderChart(){
   if(chartTimer) clearTimeout(chartTimer);
   if(chartObserver) { chartObserver.disconnect(); chartObserver = null; }
   const host = el('tv_chart');
-  host.replaceChildren();
+  clearElement(host);
   showChartMessage('Connecting to TradingView…', true);
   setFeedStatus('LOADING CHART', false);
 
@@ -245,7 +246,7 @@ function renderFib(fib){
 }
 function renderEntries(entries){
   const target = el('entries');
-  target.replaceChildren();
+  clearElement(target);
   if(!entries || !entries.length){
     target.textContent = 'No M5 entry condition detected after the H1 sweep.';
     return;
@@ -276,9 +277,11 @@ async function refreshStrategy(){
   strategyBusy = true;
   el('refreshStrategy').disabled = true;
   el('errorMessage').textContent = '';
+  const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const requestTimeout = setTimeout(function(){ if(requestController) requestController.abort(); },35000);
   try{
     const response = await fetch(API_BASE + '/api/strategy?symbol=' + encodeURIComponent(selectedSymbol), {
-      method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:AbortSignal.timeout(35000)
+      method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:requestController ? requestController.signal : undefined
     });
     const payload = await response.json().catch(() => ({}));
     if(!response.ok || !payload.ok){
@@ -288,9 +291,9 @@ async function refreshStrategy(){
     const s = payload.strategy || {};
     setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
     el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
-    setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replaceAll('_',' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
+    setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
     el('h1Detail').textContent = s.h1Sweep ? 'Sweep candle: ' + formatTime(s.h1Sweep.time) : 'Requires matching H1 sweep after D1';
-    const entryState = (s.entryStatus || 'WAITING').replaceAll('_',' ');
+    const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
     el('entryDetail').textContent = s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions';
     setMetric('dataStatus','CONNECTED','good');
@@ -322,6 +325,7 @@ async function refreshStrategy(){
     renderFib(null);
     el('entries').textContent = 'No real market data received. Signals are disabled.';
   }finally{
+    clearTimeout(requestTimeout);
     strategyBusy = false;
     el('refreshStrategy').disabled = false;
   }
