@@ -260,12 +260,12 @@ function findHourlySweep(rawBars, side, afterTime, lookback = H1_LOOKBACK_BARS) 
 function calculateFib(sweep, side) {
   const high = sweep.high, low = sweep.low, distance = high - low;
   if (!(distance > 0)) throw new Error('Cannot calculate Fibonacci levels from a zero-range candle');
-  const priceAt = fraction => side === 'bullish' ? low + distance * fraction : high - distance * fraction;
+  const priceAt = fraction => side === 'bullish' ? high - distance * fraction : low + distance * fraction;
   return {
-    '0': side === 'bullish' ? low : high,
+    '0': side === 'bullish' ? high : low,
     '0.5': priceAt(0.5),
     '0.618': priceAt(0.618),
-    '1': side === 'bullish' ? high : low
+    '1': side === 'bullish' ? low : high
   };
 }
 
@@ -281,7 +281,7 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
     const stopValid = side === 'bullish' ? stop < fib['0.5'] : stop > fib['0.5'];
     entries.push({
       type: 'FIRST_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: first.time, entry: fib['0.5'], stopLoss: stop, takeProfit: fib['1'],
+      time: first.time, entry: fib['0.5'], stopLoss: stop, takeProfit: fib['0'],
       stopValid, status: stopValid ? 'SETUP_DETECTED' : 'BLOCKED_INVALID_STOP_SIDE',
       reason: 'M5 range touched Fibonacci 0.5'
     });
