@@ -1,0 +1,29 @@
+name: Strategy Engine Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - '.github/workflows/strategy-tests.yml'
+  pull_request:
+    paths:
+      - 'api/**'
+      - '.github/workflows/strategy-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run strategy unit tests
+        run: node --test api/strategy.test.js
