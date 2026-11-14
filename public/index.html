@@ -1,126 +1,353 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>DailyBiasTrader</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#080d18">
+<title>DailyBiasTrader</title>
 <style>
-:root{color-scheme:dark;--bg:#080d18;--panel:#101a2b;--line:#1e2d43;--muted:#8292aa;--cyan:#39d9d0;--green:#38d996;--red:#ff647c}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#eef4ff;font:14px system-ui,Arial}header{padding:17px 16px 12px;display:flex;justify-content:space-between;align-items:center}.brand{font-size:18px;font-weight:800;letter-spacing:.4px}.brand span{color:var(--cyan)}.status{font-size:10px;color:#7cf4bb;border:1px solid #286c52;border-radius:20px;padding:5px 8px}main{padding:0 12px 24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px}.row{display:flex;gap:7px;align-items:center;justify-content:space-between}.chips{display:flex;gap:6px;flex-wrap:wrap}button,select{background:#17243a;color:#dce8fb;border:1px solid #2b3c56;border-radius:9px;padding:9px 11px;font-weight:650;font-size:12px}button.active{background:#123d47;border-color:var(--cyan);color:#7cf4e8}select{font-size:13px}.symbol{font-size:19px;font-weight:800}.sub{color:var(--muted);font-size:11px;margin-top:3px}.section-title{font-size:12px;color:#9eb0c9;font-weight:750;letter-spacing:1px;margin-bottom:10px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.metric{background:#0b1423;border:1px solid #1b2b41;border-radius:10px;padding:10px}.metric b{display:block;font-size:13px;margin-top:5px}.metric small{color:var(--muted);font-size:10px}.wait{color:#ffd27b;font-weight:800}.notice{font-size:11px;line-height:1.5;color:#a9b8cc}.levels{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #1b2a3d;font-size:12px}.levels:last-child{border:0}#tv_chart{height:440px;min-height:360px;width:100%;overflow:hidden;border-radius:10px;background:#0b1423;position:relative} #tv_chart iframe{width:100%!important;min-height:360px!important}#chartMessage{padding:14px 10px;color:#ffd27b;line-height:1.5;min-height:48px}footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
-</style></head><body>
-<header><div class="brand">DAILY<span>BIAS</span> TRADER<div class="sub">MULTI-MARKET STRATEGY DESK</div></div><div class="status" id="feedStatus">CONNECTING FEED</div></header>
-<main><section class="panel">
-<div class="row"><div><div class="sub">MARKET</div><div class="symbol" id="symbolLabel">XAUUSD</div></div><select id="symbol"><option value="XAUUSD">XAUUSD</option><option value="USOIL">USOIL</option><option value="XAGUSD">XAGUSD</option></select></div>
-<div class="chips" style="margin-top:13px" id="timeframes"><button data-tf="D" class="active">D1</button><button data-tf="60">H1</button><button data-tf="5">M5</button></div>
-<div class="sub" style="margin-top:10px" id="chartMessage" role="status">Connecting to TradingView…</div><div id="tv_chart"></div>
-<div class="sub" style="margin-top:8px">TradingView market chart. Green candles close above their open; red candles close below their open. Real-time availability and delays depend on the selected exchange/feed.</div>
+:root{color-scheme:dark;--bg:#080d18;--panel:#101a2b;--line:#1e2d43;--muted:#8292aa;--cyan:#39d9d0;--green:#38d996;--red:#ff647c;--amber:#ffd27b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#eef4ff;font:14px system-ui,-apple-system,Arial,sans-serif}
+header{padding:17px 16px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.brand{font-size:18px;font-weight:800;letter-spacing:.4px}.brand span{color:var(--cyan)}
+.status{font-size:10px;color:var(--amber);border:1px solid #80612a;border-radius:20px;padding:5px 8px;white-space:nowrap}
+main{padding:0 12px 24px;max-width:1100px;margin:auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px}
+.row{display:flex;gap:7px;align-items:center;justify-content:space-between}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+button,select{background:#17243a;color:#dce8fb;border:1px solid #2b3c56;border-radius:9px;padding:9px 11px;font-weight:650;font-size:12px}
+button.active{background:#123d47;border-color:var(--cyan);color:#7cf4e8}
+button:disabled{opacity:.6}
+select{font-size:13px}
+.symbol{font-size:19px;font-weight:800}
+.sub{color:var(--muted);font-size:11px;margin-top:3px}
+.section-title{font-size:12px;color:#9eb0c9;font-weight:750;letter-spacing:1px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.metric{background:#0b1423;border:1px solid #1b2b41;border-radius:10px;padding:10px;min-width:0}
+.metric b{display:block;font-size:13px;margin-top:5px;overflow-wrap:anywhere}
+.metric small{color:var(--muted);font-size:10px}
+.wait{color:var(--amber)}.good{color:var(--green)}.bad{color:var(--red)}
+.notice{font-size:11px;line-height:1.5;color:#a9b8cc}
+.notice.warn{color:#ffd27b}
+#tv_chart{height:440px;min-height:360px;width:100%;overflow:hidden;border-radius:10px;background:#0b1423;position:relative}
+.tradingview-widget-container,.tradingview-widget-container__widget{height:100%;width:100%}
+#chartMessage{padding:12px 10px;color:var(--amber);line-height:1.5;min-height:42px}
+.levels,.entry-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #1b2a3d;font-size:12px}
+.levels:last-child,.entry-row:last-child{border:0}
+.levels span,.entry-row small{color:var(--muted)}
+.price{font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
+.pill{font-size:10px;border-radius:8px;padding:4px 7px;background:#182840;color:#b8cbe5;white-space:nowrap}
+.pill.warn{background:#45341b;color:#ffd27b}
+.pill.good{background:#123c2c;color:#7cf4bb}
+.pill.bad{background:#49232d;color:#ff9cac}
+.hidden{display:none!important}
+footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
+@media(min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}#tv_chart{height:520px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">DAILY<span>BIAS</span> TRADER<div class="sub">MULTI-MARKET STRATEGY DESK</div></div>
+  <div class="status" id="feedStatus">CHECKING FEED</div>
+</header>
+<main>
+<section class="panel">
+  <div class="row">
+    <div><div class="sub">MARKET</div><div class="symbol" id="symbolLabel">XAUUSD</div></div>
+    <select id="symbol" aria-label="Select market">
+      <option value="XAUUSD">XAUUSD</option><option value="USOIL">USOIL</option><option value="XAGUSD">XAGUSD</option>
+    </select>
+  </div>
+  <div class="chips" style="margin-top:13px" id="timeframes">
+    <button data-tf="D" class="active">D1</button><button data-tf="60">H1</button><button data-tf="5">M5</button>
+    <button id="reloadChart" style="margin-left:auto">Reload chart</button>
+  </div>
+  <div id="chartMessage" role="status" aria-live="polite">Loading TradingView chart…</div>
+  <div id="tv_chart" aria-label="TradingView market chart"></div>
+  <div class="sub" style="margin-top:8px">Chart source: TradingView. Candle availability, exchange coverage and delays depend on the selected TradingView symbol/feed.</div>
 </section>
-<section class="panel"><div class="section-title">STRATEGY STATUS</div><div class="grid">
-<div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING</b></div><div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">NOT CHECKED</b></div><div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">DISABLED</b></div><div class="metric"><small>CHART SOURCE</small><b style="color:#7cf4bb">TRADINGVIEW</b></div></div>
-<p class="notice">Chart prices are supplied by TradingView. This embedded chart does not expose candle data to this app’s strategy engine, so automatic D1/H1/M5 signal calculations are not active yet. Do not use this screen as an automated trading signal.</p></section>
-<section class="panel"><div class="section-title">FIBONACCI REFERENCE</div><div class="levels"><span>1.000</span><b>100% — swing end</b></div><div class="levels"><span>0.618</span><b>61.8% — retracement</b></div><div class="levels"><span>0.500</span><b>50% — first entry level</b></div><div class="levels"><span>0.000</span><b>0% — sweep origin</b></div></section>
-<section class="panel"><div class="section-title">RULE ENGINE — CONFIGURED RULES</div>
-<p class="notice">D1 liquidity levels: PDH/PDL, PWH/PWL, PMH/PML, EQH/EQL and major swing highs/lows. A sweep must pierce the level and close back inside. D1 bias requires the matching confirmation pattern. H1 then searches for a matching earlier-candle sweep. Fib is drawn across the full H1 sweep candle range.</p>
-<p class="notice">M5 first entry: touch 0.5; requested SL 0.618 and TP 1. Second entry: sweep 0.618 and close back inside; requested candle-extreme stop and TP 1. Some requested stop placements may be on the wrong side of the trade. Live signals remain disabled pending validation and backtesting.</p></section><footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer></main>
+
+<section class="panel">
+  <div class="row"><div class="section-title">AUTOMATIC STRATEGY STATUS</div><button id="refreshStrategy">Refresh signals</button></div>
+  <div class="grid">
+    <div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING FOR FEED</b><div class="sub" id="biasDetail">No calculation yet</div></div>
+    <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">Requires D1 bias</div></div>
+    <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">WAITING</b><div class="sub" id="entryDetail">Requires H1 sweep</div></div>
+    <div class="metric"><small>OHLC DATA</small><b class="wait" id="dataStatus">NOT CONNECTED</b><div class="sub" id="dataDetail">D1 / H1 / M5</div></div>
+  </div>
+  <div class="notice" id="providerNote" style="margin-top:12px">Strategy feed: Twelve Data spot commodities. The API key is kept on the server, not in the app.</div>
+  <div class="notice warn hidden" id="riskWarning" style="margin-top:10px"></div>
+  <div class="notice" id="errorMessage" style="margin-top:10px" role="status"></div>
+  <div class="sub" id="updatedAt" style="margin-top:10px">Not updated yet</div>
+</section>
+
+<section class="panel">
+  <div class="section-title">H1 FIBONACCI — SWEEP CANDLE RANGE</div>
+  <div id="fibLevels"><div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div></div>
+</section>
+
+<section class="panel">
+  <div class="section-title">DETECTED ENTRY SETUPS</div>
+  <div id="entries" class="notice">No entry detected. No sample or synthetic prices are shown.</div>
+</section>
+
+<section class="panel">
+  <div class="section-title">STRATEGY RULES</div>
+  <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
+  <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The current implementation searches up to 500 earlier H1 candles. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
+  <p class="notice">M5 first entry: touch of 0.5; requested SL 0.618 and TP 1. Second entry: sweep of 0.618 and close back across; requested BUY stop is the sweep candle high and SELL stop is its low; TP 1.</p>
+  <p class="notice warn">Risk validation: the specified stop-loss levels are on the wrong side of the entry under the specified Fibonacci direction. The app preserves your requested levels but blocks those setups instead of presenting them as safe or executable trades.</p>
+</section>
+<footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
+</main>
 <script>
 (function(){
 'use strict';
-let selectedSymbol='XAUUSD';
-let selectedInterval='D';
-let widgetInstance=null;
-let loadTimer=null;
-const symbols={XAUUSD:'OANDA:XAUUSD',USOIL:'TVC:USOIL',XAGUSD:'OANDA:XAGUSD'};
-const host=document.getElementById('tv_chart');
-const message=document.getElementById('chartMessage');
-const status=document.getElementById('feedStatus');
-const loader=document.createElement('script');
-loader.src='https://s3.tradingview.com/tv.js';
-loader.async=true;
-function setStatus(text,connected){
- status.textContent=text;
- status.style.color=connected?'#7cf4bb':'#ffd27b';
- status.style.borderColor=connected?'#286c52':'#80612a';
+const API_BASE = 'https://dailybiastrader-api.onrender.com';
+const chartSymbols = {XAUUSD:'OANDA:XAUUSD',USOIL:'TVC:USOIL',XAGUSD:'OANDA:XAGUSD'};
+let selectedSymbol = 'XAUUSD';
+let selectedInterval = 'D';
+let chartTimer = null;
+let chartObserver = null;
+let chartGeneration = 0;
+let strategyBusy = false;
+
+const el = id => document.getElementById(id);
+function setFeedStatus(text, good){
+  el('feedStatus').textContent = text;
+  el('feedStatus').style.color = good ? '#7cf4bb' : '#ffd27b';
+  el('feedStatus').style.borderColor = good ? '#286c52' : '#80612a';
 }
-function showMessage(text){
- message.textContent=text;
- message.style.display='block';
+function showChartMessage(text, visible){
+  el('chartMessage').textContent = text;
+  el('chartMessage').classList.toggle('hidden', !visible);
 }
-function drawChart(){
- if(!window.TradingView||typeof window.TradingView.widget!=='function'){
-   setStatus('FEED UNAVAILABLE',false);
-   showMessage('TradingView did not load. Check your internet connection, then reload this page.');
-   return;
- }
- if(loadTimer)clearTimeout(loadTimer);
- host.innerHTML='';
- message.style.display='none';
- setStatus('LOADING CHART',false);
- try{
-  widgetInstance=new window.TradingView.widget({
-   autosize:true,
-   symbol:symbols[selectedSymbol],
-   interval:selectedInterval,
-   timezone:'Asia/Dhaka',
-   theme:'dark',
-   style:'1',
-   locale:'en',
-   toolbar_bg:'#101a2b',
-   enable_publishing:false,
-   hide_top_toolbar:false,
-   hide_legend:false,
-   save_image:false,
-   container_id:'tv_chart',
-   backgroundColor:'#101a2b',
-   gridColor:'#17253a',
-   allow_symbol_change:false,
-   details:false,
-   hotlist:false,
-   calendar:false,
-   studies:[],
-   overrides:{
-    'mainSeriesProperties.candleStyle.upColor':'#38d996',
-    'mainSeriesProperties.candleStyle.downColor':'#ff647c',
-    'mainSeriesProperties.candleStyle.borderUpColor':'#38d996',
-    'mainSeriesProperties.candleStyle.borderDownColor':'#ff647c',
-    'mainSeriesProperties.candleStyle.wickUpColor':'#38d996',
-    'mainSeriesProperties.candleStyle.wickDownColor':'#ff647c'
-   }
-  });
-  if(widgetInstance && typeof widgetInstance.onChartReady==='function'){
-   widgetInstance.onChartReady(function(){
-    if(loadTimer)clearTimeout(loadTimer);
-    setStatus('CHART READY',true);
-    message.style.display='none';
-   });
-  }
-  loadTimer=setTimeout(function(){
-   if(!host.querySelector('iframe')) {
-    setStatus('CHART TIMEOUT',false);
-    showMessage('TradingView did not create the chart. Check your connection or open the preview in Chrome.');
-   } else {
-    setStatus('WAITING FOR DATA',false);
-    showMessage('The chart frame opened, but TradingView has not finished loading market data yet.');
-   }
-  },20000);
- }catch(e){
-  setStatus('CHART ERROR',false);
-  showMessage('Could not create the TradingView chart. Reload and try again.');
- }
+function showChartFailure(text){
+  showChartMessage(text, true);
+  setFeedStatus('CHART ERROR', false);
 }
 function renderChart(){
- document.getElementById('symbolLabel').textContent=selectedSymbol;
- if(window.TradingView)drawChart();
- else showMessage('Loading TradingView chart…');
+  const generation = ++chartGeneration;
+  if(chartTimer) clearTimeout(chartTimer);
+  if(chartObserver) { chartObserver.disconnect(); chartObserver = null; }
+  const host = el('tv_chart');
+  host.replaceChildren();
+  showChartMessage('Connecting to TradingView…', true);
+  setFeedStatus('LOADING CHART', false);
+
+  const container = document.createElement('div');
+  container.className = 'tradingview-widget-container';
+  container.style.height = '100%';
+  container.style.width = '100%';
+
+  const widgetHost = document.createElement('div');
+  widgetHost.className = 'tradingview-widget-container__widget';
+  widgetHost.style.height = '100%';
+  widgetHost.style.width = '100%';
+
+  const script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.async = true;
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  const config = {
+    autosize: true,
+    symbol: chartSymbols[selectedSymbol],
+    interval: selectedInterval,
+    timezone: 'Asia/Dhaka',
+    theme: 'dark',
+    style: '1',
+    locale: 'en',
+    allow_symbol_change: false,
+    calendar: false,
+    details: false,
+    hide_side_toolbar: false,
+    hide_top_toolbar: false,
+    hide_legend: false,
+    hide_volume: false,
+    save_image: false,
+    withdateranges: true,
+    backgroundColor: '#080d18',
+    gridColor: '#1e2d43',
+    support_host: 'https://www.tradingview.com',
+    overrides: {
+      'mainSeriesProperties.candleStyle.upColor': '#38d996',
+      'mainSeriesProperties.candleStyle.downColor': '#ff647c',
+      'mainSeriesProperties.candleStyle.borderUpColor': '#38d996',
+      'mainSeriesProperties.candleStyle.borderDownColor': '#ff647c',
+      'mainSeriesProperties.candleStyle.wickUpColor': '#38d996',
+      'mainSeriesProperties.candleStyle.wickDownColor': '#ff647c'
+    }
+  };
+  script.textContent = JSON.stringify(config);
+  script.onerror = function(){
+    if(generation !== chartGeneration) return;
+    showChartFailure('TradingView’s chart script could not load. Check internet access or try opening the preview in Chrome.');
+  };
+
+  container.appendChild(widgetHost);
+  container.appendChild(script);
+  host.appendChild(container);
+
+  chartObserver = new MutationObserver(function(){
+    if(generation !== chartGeneration) return;
+    const frame = widgetHost.querySelector('iframe');
+    if(frame && !frame.dataset.dbtLoadObserved){
+      frame.dataset.dbtLoadObserved = '1';
+      frame.addEventListener('load', function(){
+        if(generation !== chartGeneration) return;
+        showChartMessage('TradingView chart frame loaded. Waiting for the selected market feed…', true);
+        setFeedStatus('CHART FRAME LOADED', false);
+      }, {once:true});
+    }
+  });
+  chartObserver.observe(widgetHost, {childList:true,subtree:true});
+
+  chartTimer = setTimeout(function(){
+    if(generation !== chartGeneration) return;
+    const frame = widgetHost.querySelector('iframe');
+    if(!frame){
+      showChartFailure('TradingView did not create a chart frame. The script may be blocked by the network, browser or WebView.');
+    } else {
+      showChartMessage('The TradingView frame exists but has not confirmed its market feed. Check symbol availability and connection.', true);
+      setFeedStatus('FEED NOT VERIFIED', false);
+    }
+  }, 25000);
 }
-document.getElementById('symbol').addEventListener('change',function(e){
- selectedSymbol=e.target.value;
- renderChart();
-});
-document.querySelectorAll('#timeframes button').forEach(function(button){
- button.addEventListener('click',function(){
-  selectedInterval=button.dataset.tf;
-  document.querySelectorAll('#timeframes button').forEach(function(item){item.classList.toggle('active',item===button);});
+function formatPrice(value){
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—';
+}
+function formatTime(value){
+  if(!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('en-GB',{timeZone:'Asia/Dhaka'});
+}
+function setMetric(id, text, state){
+  const node = el(id);
+  node.textContent = text;
+  node.className = state || 'wait';
+}
+function renderFib(fib){
+  const target = el('fibLevels');
+  if(!fib){ target.innerHTML = '<div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div>'; return; }
+  target.innerHTML = '';
+  [['1','100% — TP reference'],['0.618','61.8% — second entry / requested SL'],['0.5','50% — first entry'],['0','0% — sweep origin']].forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'levels';
+    const name = document.createElement('span');
+    name.textContent = item[0] + '  •  ' + item[1];
+    const price = document.createElement('b');
+    price.className = 'price';
+    price.textContent = formatPrice(fib[item[0]]);
+    row.append(name,price);
+    target.appendChild(row);
+  });
+}
+function renderEntries(entries){
+  const target = el('entries');
+  target.replaceChildren();
+  if(!entries || !entries.length){
+    target.textContent = 'No M5 entry condition detected after the H1 sweep.';
+    return;
+  }
+  entries.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'entry-row';
+    const left = document.createElement('div');
+    const title = document.createElement('b');
+    title.textContent = entry.direction + ' • ' + (entry.type === 'FIRST_ENTRY' ? 'FIRST ENTRY' : 'SECOND ENTRY');
+    const detail = document.createElement('div');
+    detail.className = 'sub';
+    detail.textContent = entry.reason + ' • ' + formatTime(entry.time);
+    const badge = document.createElement('div');
+    badge.className = 'pill ' + (entry.stopValid ? 'good' : 'bad');
+    badge.textContent = entry.stopValid ? 'STOP VALID' : 'BLOCKED — STOP SIDE';
+    left.append(title,detail,badge);
+    const prices = document.createElement('div');
+    prices.className = 'price';
+    prices.textContent = 'Entry ' + formatPrice(entry.entry) + '\nSL ' + formatPrice(entry.stopLoss) + '\nTP ' + formatPrice(entry.takeProfit);
+    prices.style.whiteSpace = 'pre-line';
+    row.append(left,prices);
+    target.appendChild(row);
+  });
+}
+async function refreshStrategy(){
+  if(strategyBusy) return;
+  strategyBusy = true;
+  el('refreshStrategy').disabled = true;
+  el('errorMessage').textContent = '';
+  try{
+    const response = await fetch(API_BASE + '/api/strategy?symbol=' + encodeURIComponent(selectedSymbol), {
+      method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:AbortSignal.timeout(35000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if(!response.ok || !payload.ok){
+      const error = payload.error || ('Strategy service returned HTTP ' + response.status);
+      throw new Error(error);
+    }
+    const s = payload.strategy || {};
+    setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
+    el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
+    setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replaceAll('_',' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
+    el('h1Detail').textContent = s.h1Sweep ? 'Sweep candle: ' + formatTime(s.h1Sweep.time) : 'Requires matching H1 sweep after D1';
+    const entryState = (s.entryStatus || 'WAITING').replaceAll('_',' ');
+    setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
+    el('entryDetail').textContent = s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions';
+    setMetric('dataStatus','CONNECTED','good');
+    el('dataDetail').textContent = 'D1 ' + payload.candles.d1 + ' • H1 ' + payload.candles.h1 + ' • M5 ' + payload.candles.m5;
+    el('providerNote').textContent = 'Strategy candles: ' + payload.source + ' (' + payload.providerSymbol + '). Chart candles remain sourced independently from TradingView.';
+    el('updatedAt').textContent = 'Last API update: ' + formatTime(payload.fetchedAt) + ' Dhaka time';
+    el('riskWarning').textContent = s.riskWarning || '';
+    el('riskWarning').classList.toggle('hidden', !s.riskWarning);
+    renderFib(s.fib);
+    renderEntries(s.entries);
+    setFeedStatus('STRATEGY FEED LIVE', true);
+  }catch(error){
+    const message = error && error.name === 'TimeoutError'
+      ? 'Strategy service took too long to respond. A free Render service may be waking up; retry shortly.'
+      : (error && error.message) || 'Could not reach the strategy service.';
+    el('errorMessage').textContent = message;
+    setMetric('dataStatus','UNAVAILABLE','bad');
+    el('dataDetail').textContent = 'No live OHLC received';
+    if(/key is not configured/i.test(message)){
+      el('providerNote').textContent = 'The API server is deployed, but TWELVEDATA_API_KEY has not been configured. Add a Twelve Data key with commodity market access in Render to enable live strategy calculations.';
+      setFeedStatus('API KEY NEEDED',false);
+    }else{
+      el('providerNote').textContent = 'Strategy feed unavailable. The app will not invent candles or signals.';
+      setFeedStatus('STRATEGY FEED ERROR',false);
+    }
+    setMetric('bias','NO DATA','bad');
+    setMetric('h1','NO DATA','bad');
+    setMetric('entry','DISABLED','wait');
+    renderFib(null);
+    el('entries').textContent = 'No real market data received. Signals are disabled.';
+  }finally{
+    strategyBusy = false;
+    el('refreshStrategy').disabled = false;
+  }
+}
+el('symbol').addEventListener('change',function(event){
+  selectedSymbol = event.target.value;
+  el('symbolLabel').textContent = selectedSymbol;
   renderChart();
- });
+  refreshStrategy();
 });
-loader.onload=function(){renderChart();};
-loader.onerror=function(){setStatus('FEED UNAVAILABLE',false);showMessage('TradingView script could not be downloaded. Check your internet connection.');};
-document.head.appendChild(loader);
+document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
+  button.addEventListener('click',function(){
+    selectedInterval = button.dataset.tf;
+    document.querySelectorAll('#timeframes button[data-tf]').forEach(item => item.classList.toggle('active',item === button));
+    renderChart();
+  });
+});
+el('reloadChart').addEventListener('click',renderChart);
+el('refreshStrategy').addEventListener('click',refreshStrategy);
+document.addEventListener('visibilitychange',function(){
+  if(!document.hidden) refreshStrategy();
+});
+renderChart();
+refreshStrategy();
+setInterval(function(){ if(!document.hidden) refreshStrategy(); },30000);
 })();
-</script></body></html>
+</script>
+</body>
+</html>
