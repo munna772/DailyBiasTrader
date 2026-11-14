@@ -126,7 +126,7 @@ test('second M5 entry reports the latest completed 0.618 sweep, not the oldest h
 });
 
 
-test('first BUY entry uses 0.618 below entry as stop and 1 as target', () => {
+test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T06:00:00', 109, 111, 108, 109);
   const entries = findM5Entries([current], 'bullish', current.time, fib, []);
@@ -137,7 +137,7 @@ test('first BUY entry uses 0.618 below entry as stop and 1 as target', () => {
   assert.equal(first.stopValid, true);
 });
 
-test('first SELL entry uses 0.618 above entry as stop and 1 as target', () => {
+test('first SELL entry uses 0.618 above entry as stop and 0 as target', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const current = c('2026-11-10T06:00:00', 111, 112, 109, 111);
   const entries = findM5Entries([current], 'bearish', current.time, fib, []);
