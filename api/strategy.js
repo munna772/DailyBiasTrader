@@ -176,7 +176,7 @@ function isInsideThreeBearish(bars, i) {
   return isBear(first) && isBull(inside) && inside.high <= first.high && inside.low >= first.low && isBear(third);
 }
 
-function dailyConfirmation(bars, i, side) {
+function dailyConfirmation(bars, i, side, sweepIndex = -1) {
   const current = bars[i], previous = bars[i - 1];
   if (!previous) return null;
   if (side === 'bullish') {
@@ -184,13 +184,13 @@ function dailyConfirmation(bars, i, side) {
     if (isBullishEngulfing(current, previous)) return 'Bullish engulfing';
     if (isBullishRejection(current)) return 'Bullish rejection';
     if (isBullishDisplacement(bars, i)) return 'Bullish displacement';
-    if (isInsideThreeBullish(bars, i)) return 'Bullish 3-candle inside-bar pattern';
+    if (i >= sweepIndex + 3 && isInsideThreeBullish(bars, i)) return 'Bullish 3-candle inside-bar pattern';
   } else {
     if (current.close < previous.low) return 'D1 close below previous low';
     if (isBearishEngulfing(current, previous)) return 'Bearish engulfing';
     if (isBearishRejection(current)) return 'Bearish rejection';
     if (isBearishDisplacement(bars, i)) return 'Bearish displacement';
-    if (isInsideThreeBearish(bars, i)) return 'Bearish 3-candle inside-bar pattern';
+    if (i >= sweepIndex + 3 && isInsideThreeBearish(bars, i)) return 'Bearish 3-candle inside-bar pattern';
   }
   return null;
 }
@@ -215,7 +215,7 @@ function findDailyBias(rawBars) {
   const latestEvent = latestEvents[0];
   let confirmation = null;
   for (let i = latestEvent.index + 1; i < bars.length; i++) {
-    const pattern = dailyConfirmation(bars, i, latestEvent.side);
+    const pattern = dailyConfirmation(bars, i, latestEvent.side, latestEvent.index);
     if (pattern) {
       confirmation = { pattern, time: bars[i].time + 24 * 60 * 60 * 1000, candleTime: bars[i].time, index: i };
       break;
@@ -301,10 +301,14 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
     });
   }
 
-  const secondCandidates = closedBars.filter(c => side === 'bullish'
-    ? c.low < fib['0.618'] && c.close > fib['0.618']
-    : c.high > fib['0.618'] && c.close < fib['0.618']);
-  const second = secondCandidates.length ? secondCandidates[secondCandidates.length - 1] : null;
+  // A second-entry signal is only actionable at the close of the latest
+  // completed M5 candle. Do not replay an older sweep as a fresh entry.
+  const latestClosed = closedBars.length ? closedBars[closedBars.length - 1] : null;
+  const second = latestClosed && (side === 'bullish'
+    ? latestClosed.low < fib['0.618'] && latestClosed.close > fib['0.618']
+    : latestClosed.high > fib['0.618'] && latestClosed.close < fib['0.618'])
+    ? latestClosed
+    : null;
 
   if (second) {
     const stop = side === 'bullish' ? second.low : second.high;
