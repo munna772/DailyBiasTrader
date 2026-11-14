@@ -346,6 +346,35 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
   return entries.sort((a, b) => a.time - b.time);
 }
 
+function assessMarketDataFreshness(rawBars, now = Date.now()) {
+  const bars = normalizeCandles(rawBars);
+  if (!bars.length) {
+    return { status: 'NO_DATA', stale: true, ageMinutes: null, latestCandleAt: null };
+  }
+  const latest = bars[bars.length - 1];
+  // Provider timestamps are candle-open times. Measure age from the expected
+  // close of the latest 5-minute candle, not from when the API was fetched.
+  const ageMs = Math.max(0, now - (latest.time + 5 * 60 * 1000));
+  const ageMinutes = Math.floor(ageMs / 60000);
+  const stale = ageMs > 15 * 60 * 1000;
+  return {
+    status: stale ? 'STALE' : 'FRESH',
+    stale,
+    ageMinutes,
+    latestCandleAt: new Date(latest.time).toISOString()
+  };
+}
+
+function gateStrategyOnFreshness(strategy, freshness) {
+  if (!freshness || !freshness.stale || strategy.h1Status !== 'CONFIRMED') return strategy;
+  return {
+    ...strategy,
+    entryStatus: 'WAITING_FOR_FRESH_M5_DATA',
+    entries: [],
+    riskWarning: null
+  };
+}
+
 function analyzeStrategy(input) {
   const d1 = normalizeCandles(input.d1), h1 = normalizeCandles(input.h1), m5 = normalizeCandles(input.m5);
   const daily = findDailyBias(d1);
@@ -387,5 +416,6 @@ function analyzeStrategy(input) {
 module.exports = {
   normalizeCandles, buildDailyLevels, findSweep, dailyConfirmation, findDailyBias,
   findHourlySweep, calculateFib, candleTouches, findM5Entries, analyzeStrategy,
-  isInsideThreeBullish, isInsideThreeBearish
+  isInsideThreeBullish, isInsideThreeBearish,
+  assessMarketDataFreshness, gateStrategyOnFreshness
 };
