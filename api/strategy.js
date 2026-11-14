@@ -271,7 +271,7 @@ function calculateFib(sweep, side) {
 
 function candleTouches(candle, price) { return candle.low <= price && candle.high >= price; }
 
-function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
+function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, symbol = null) {
   const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
@@ -291,14 +291,29 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
     : c.high > fib['0.618'] && c.close < fib['0.618']);
   const second = secondCandidates.length ? secondCandidates[secondCandidates.length - 1] : null;
   if (second) {
-    const stop = side === 'bullish' ? second.high : second.low;
-    const entry = fib['0.618'];
-    const stopValid = side === 'bullish' ? stop < entry : stop > entry;
+    const stop = side === 'bullish' ? second.low : second.high;
+    const entry = second.close;
+    const stopDistance = Math.abs(entry - stop);
+    const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
+    // The 4-pip Gold rule is represented as a $0.40 quoted-price distance.
+    // Silver and USOIL do not inherit this cap.
+    const maxStopDistance = String(symbol || '').toUpperCase() === 'XAUUSD' ? 0.40 : null;
+    const withinStopLimit = maxStopDistance === null || stopDistance <= maxStopDistance + 1e-10;
+    const stopValid = stopSideValid && withinStopLimit;
+    const status = !stopSideValid
+      ? 'BLOCKED_INVALID_STOP_SIDE'
+      : !withinStopLimit
+        ? 'BLOCKED_STOP_TOO_WIDE'
+        : 'SETUP_DETECTED';
     entries.push({
       type: 'SECOND_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
       time: second.time, entry, stopLoss: stop, takeProfit: fib['0'],
-      stopValid, status: stopValid ? 'SETUP_DETECTED' : 'BLOCKED_INVALID_STOP_SIDE',
-      reason: 'M5 swept Fibonacci 0.618 and closed back across it'
+      stopDistance, maxStopDistance, stopSideValid, stopValid, status,
+      reason: !stopSideValid
+        ? 'Sweep candle wick stop is on the wrong side of the entry'
+        : !withinStopLimit
+          ? 'Gold second-entry stop exceeds the 4-pip ($0.40) maximum'
+          : 'M5 swept Fibonacci 0.618, closed back across it, and entry is at the candle close'
     });
   }
   return entries.sort((a, b) => a.time - b.time);
@@ -316,7 +331,7 @@ function analyzeStrategy(input) {
     return { bias: daily.bias, biasReason: daily.reason, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
   }
   const fib = calculateFib(h1Sweep.candle, side);
-  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
+  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5, input.symbol);
   const blocked = entries.some(entry => !entry.stopValid);
   return {
     bias: daily.bias, biasReason: daily.reason, h1Status: 'CONFIRMED',
