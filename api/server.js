@@ -135,6 +135,7 @@ async function loadMarket(symbolKey) {
     d1: completedOnly(dailyRaw, 24 * 60 * 60 * 1000, now),
     h1: completedOnly(hourlyRaw, 60 * 60 * 1000, now),
     m5: fiveMinuteRaw,
+    m5Closed: completedOnly(fiveMinuteRaw, 5 * 60 * 1000, now),
     source: PROVIDER,
     providerSymbol,
     fetchedAt: now,
