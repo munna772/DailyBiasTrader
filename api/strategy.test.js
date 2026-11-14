@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -181,7 +181,7 @@ test('first M5 entry checks the latest intrabar candle instead of re-signalling 
   assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), false);
 });
 
-test('second M5 entry reports the latest completed 0.618 sweep, not the oldest historical one', () => {
+test('second M5 entry reports the latest completed candle only', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const older = c('2026-11-10T05:00:00', 113, 115, 111, 113);
   const newer = c('2026-11-10T05:05:00', 108, 116, 106, 109);
@@ -191,6 +191,31 @@ test('second M5 entry reports the latest completed 0.618 sweep, not the oldest h
   assert.equal(second.time, newer.time);
 });
 
+
+test('second M5 entry does not replay an old sweep after a newer completed candle', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const oldSweep = c('2026-11-10T05:00:00', 108, 116, 106, 109);
+  const latestClosed = c('2026-11-10T05:05:00', 109, 112, 108, 111);
+  const entries = findM5Entries([oldSweep, latestClosed], 'bullish', oldSweep.time, fib, [oldSweep, latestClosed]);
+  assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
+});
+
+test('three-candle D1 inside pattern must form entirely after the liquidity sweep', () => {
+  const sweepAsFirst = [
+    c('2026-11-10T00:00:00', 10, 15, 9, 14),
+    c('2026-11-11T00:00:00', 14, 14.5, 10, 11),
+    c('2026-11-12T00:00:00', 11, 14, 10, 13)
+  ];
+  assert.equal(dailyConfirmation(sweepAsFirst, 2, 'bullish', 0), null);
+
+  const formedAfterSweep = [
+    c('2026-11-10T00:00:00', 12, 13, 10, 11),
+    c('2026-11-11T00:00:00', 10, 15, 9, 14),
+    c('2026-11-12T00:00:00', 14, 14.5, 10, 11),
+    c('2026-11-13T00:00:00', 11, 14, 10, 13)
+  ];
+  assert.equal(dailyConfirmation(formedAfterSweep, 3, 'bullish', 0), 'Bullish 3-candle inside-bar pattern');
+});
 
 test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
