@@ -77,7 +77,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">WAITING</b><div class="sub" id="entryDetail">Requires H1 sweep</div></div>
     <div class="metric"><small>OHLC DATA</small><b class="wait" id="dataStatus">NOT CONNECTED</b><div class="sub" id="dataDetail">D1 / H1 / M5</div></div>
   </div>
-  <div class="notice" id="providerNote" style="margin-top:12px">Strategy feed: Twelve Data spot commodities. The API key is kept on the server, not in the app.</div>
+  <div class="notice" id="providerNote" style="margin-top:12px">Strategy candles: SiftingIO. TradingView chart data is independent; the API key stays on the server.</div>
   <div class="notice warn hidden" id="riskWarning" style="margin-top:10px"></div>
   <div class="notice" id="errorMessage" style="margin-top:10px" role="status"></div>
   <div class="sub" id="updatedAt" style="margin-top:10px">Not updated yet</div>
@@ -97,8 +97,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
   <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The implementation searches all earlier H1 candles returned by the market-data provider. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
-  <p class="notice">M5 first entry: touch of 0.5; requested SL 0.618 and TP 0. Second entry: sweep of 0.618 and close back across; requested BUY stop is the sweep candle high and SELL stop is its low; TP 0.</p>
-  <p class="notice warn">Risk validation: the specified stop-loss levels are on the wrong side of the entry under the specified Fibonacci direction. The app preserves your requested levels but blocks those setups instead of presenting them as safe or executable trades.</p>
+  <p class="notice">M5 first entry: touch of 0.5; SL at 0.618 and TP at 0. BUY stop must be below entry; SELL stop must be above entry. Second entry: wait for a completed M5 candle to sweep 0.618 and close back across it; enter at that candle close, with BUY SL at its low or SELL SL at its high; TP remains Fib 0. The 4-pip ($0.40 quoted-price) stop-distance cap applies only to Gold second entries.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
 </main>
@@ -245,8 +244,15 @@ function renderEntries(entries){
     detail.className = 'sub';
     detail.textContent = entry.reason + ' • ' + formatTime(entry.time);
     const badge = document.createElement('div');
-    badge.className = 'pill ' + (entry.stopValid ? 'good' : 'bad');
-    badge.textContent = entry.stopValid ? 'STOP VALID' : 'BLOCKED — STOP SIDE';
+    const setupValid = typeof entry.setupValid === 'boolean' ? entry.setupValid : entry.stopValid;
+    const statusLabels = {
+      SETUP_DETECTED: 'RISK CHECK PASSED',
+      BLOCKED_INVALID_STOP_SIDE: 'BLOCKED — SL SIDE',
+      BLOCKED_INVALID_TARGET_SIDE: 'BLOCKED — TP SIDE',
+      BLOCKED_STOP_TOO_WIDE: 'BLOCKED — SL TOO WIDE'
+    };
+    badge.className = 'pill ' + (setupValid ? 'good' : 'bad');
+    badge.textContent = statusLabels[entry.status] || (setupValid ? 'RISK CHECK PASSED' : 'BLOCKED — RISK CHECK');
     left.append(title,detail,badge);
     const prices = document.createElement('div');
     prices.className = 'price';
@@ -296,7 +302,7 @@ async function refreshStrategy(){
     setMetric('dataStatus','UNAVAILABLE','bad');
     el('dataDetail').textContent = 'No live OHLC received';
     if(/key is not configured/i.test(message)){
-      el('providerNote').textContent = 'The API server is deployed, but TWELVEDATA_API_KEY has not been configured. Add a Twelve Data key with commodity market access in Render to enable live strategy calculations.';
+      el('providerNote').textContent = 'The API server is deployed, but DAILY_BIAS_TRADER (or SIFTING_API_KEY) has not been configured in Render to enable SiftingIO market data.';
     }else{
       el('providerNote').textContent = 'Strategy feed unavailable. The app will not invent candles or signals.';
     }
