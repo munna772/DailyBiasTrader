@@ -83,7 +83,7 @@ test('4-pip ($0.40) maximum applies to Gold second entries only', () => {
   const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
   const silver = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAGUSD').find(e => e.type === 'SECOND_ENTRY');
   const oil = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'USOIL').find(e => e.type === 'SECOND_ENTRY');
-  assert.equal(gold.stopDistance, 0.8);
+  assert.ok(Math.abs(gold.stopDistance - 0.8) < 1e-9);
   assert.equal(gold.maxStopDistance, 0.4);
   assert.equal(gold.stopValid, false);
   assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
@@ -95,9 +95,10 @@ test('4-pip ($0.40) maximum applies to Gold second entries only', () => {
 
 test('Gold second-entry stop at or below $0.40 is allowed', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107.8, 108.1, 107.7, 108)];
+  const bars = [c('2026-11-10T05:00:00', 107.8, 108.1, 107.63, 108.03)];
   const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
-  assert.equal(gold.stopDistance, 0.3);
+  assert.ok(gold);
+  assert.ok(Math.abs(gold.stopDistance - 0.4) < 1e-9);
   assert.equal(gold.stopValid, true);
 });
 
