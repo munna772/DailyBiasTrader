@@ -288,3 +288,14 @@ test('fresh M5 data preserves the strategy result unchanged', () => {
   const result = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false });
   assert.equal(result, strategy);
 });
+
+
+test('freshness state is initialized before entry detail reads it in both UIs', () => {
+  for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const stateIndex = source.indexOf('const dataStale =');
+    const readIndex = source.indexOf('dataStale && s.h1Status');
+    assert.ok(stateIndex >= 0 && readIndex >= 0);
+    assert.ok(stateIndex < readIndex, 'dataStale must be initialized before it is read');
+  }
+});
