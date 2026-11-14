@@ -217,7 +217,7 @@ function findDailyBias(rawBars) {
   for (let i = latestEvent.index; i < bars.length; i++) {
     const pattern = dailyConfirmation(bars, i, latestEvent.side);
     if (pattern) {
-      confirmation = { pattern, time: bars[i].time, index: i };
+      confirmation = { pattern, time: bars[i].time + 24 * 60 * 60 * 1000, candleTime: bars[i].time, index: i };
       break;
     }
   }
@@ -245,12 +245,12 @@ function findHourlySweep(rawBars, side, afterTime, lookback = H1_LOOKBACK_BARS) 
     if (side === 'bullish') {
       const swept = prior.map(c => c.low).filter(level => current.low < level && current.close > level);
       if (swept.length) {
-        return { side, level: Math.max(...swept), time: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
+        return { side, level: Math.max(...swept), time: current.time + 60 * 60 * 1000, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
       }
     } else {
       const swept = prior.map(c => c.high).filter(level => current.high > level && current.close < level);
       if (swept.length) {
-        return { side, level: Math.min(...swept), time: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
+        return { side, level: Math.min(...swept), time: current.time + 60 * 60 * 1000, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
       }
     }
   }
@@ -271,8 +271,9 @@ function calculateFib(sweep, side) {
 
 function candleTouches(candle, price) { return candle.low <= price && candle.high >= price; }
 
-function findM5Entries(rawBars, side, sweepTime, fib) {
+function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
   const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
+  const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
   const first = bars.find(c => candleTouches(c, fib['0.5']));
   if (first) {
@@ -285,7 +286,7 @@ function findM5Entries(rawBars, side, sweepTime, fib) {
       reason: 'M5 range touched Fibonacci 0.5'
     });
   }
-  const second = bars.find(c => side === 'bullish'
+  const second = closedBars.find(c => side === 'bullish'
     ? c.low < fib['0.618'] && c.close > fib['0.618']
     : c.high > fib['0.618'] && c.close < fib['0.618']);
   if (second) {
@@ -314,7 +315,7 @@ function analyzeStrategy(input) {
     return { bias: daily.bias, biasReason: daily.reason, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
   }
   const fib = calculateFib(h1Sweep.candle, side);
-  const entries = findM5Entries(m5, side, h1Sweep.time, fib);
+  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
   const blocked = entries.some(entry => !entry.stopValid);
   return {
     bias: daily.bias, biasReason: daily.reason, h1Status: 'CONFIRMED',
