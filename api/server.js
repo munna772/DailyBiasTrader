@@ -2,7 +2,7 @@
 
 const http = require('node:http');
 const { URL } = require('node:url');
-const { analyzeStrategy, normalizeCandles } = require('./strategy');
+const { analyzeStrategy, normalizeCandles, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 
 const PORT = Number(process.env.PORT || 10000);
 const API_KEY = process.env.DAILY_BIAS_TRADER || process.env.SIFTING_API_KEY || '';
@@ -184,13 +184,15 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const market = await loadMarket(symbol);
-    const result = analyzeStrategy({ ...market, symbol });
+    const freshness = assessMarketDataFreshness(market.m5);
+    const result = gateStrategyOnFreshness(analyzeStrategy({ ...market, symbol }), freshness);
     return send(res, 200, {
       ok: true,
       symbol,
       providerSymbol: market.providerSymbol,
       source: market.source,
       fetchedAt: new Date(market.fetchedAt).toISOString(),
+      dataFreshness: freshness,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
       strategy: result
     });
