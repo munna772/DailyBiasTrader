@@ -1,0 +1,14 @@
+{
+  "name": "dailybiastrader-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OHLC feed adapter and deterministic strategy engine for DailyBiasTrader",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
