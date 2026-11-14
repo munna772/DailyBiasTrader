@@ -10,41 +10,46 @@ Android/browser multi-market strategy analysis app for XAUUSD, USOIL and XAGUSD.
 
 ## Market-data setup
 
-The app keeps the strategy-data provider key on the API server. It is never embedded in the browser or Android app.
+The strategy API uses SiftingIO commodity historical bars. The API key is kept on the server and is never embedded in the browser or Android app.
 
-Set this Render environment variable on the \`dailybiastrader-api\` service:
+Set this Render environment variable on the `dailybiastrader-api` service:
 
-- \`TWELVEDATA_API_KEY\`
+- `DAILY_BIAS_TRADER` (or `SIFTING_API_KEY` as a fallback)
 
 The API maps:
-- XAUUSD to Twelve Data \`XAU/USD\`
-- XAGUSD to Twelve Data \`XAG/USD\`
-- USOIL to Twelve Data \`WTI/USD\`
+- XAUUSD to SiftingIO `XAUUSD`
+- XAGUSD to SiftingIO `XAGUSD`
+- USOIL to SiftingIO `WTIUSD`
 
-Twelve Data commodity intraday time-series access requires a plan that includes its commodity market data. A free key without this entitlement will not activate live strategy calculations.
+Health endpoint: `/api/health`
+Strategy endpoints: `/api/strategy?symbol=XAUUSD` (also `USOIL`, `XAGUSD`)
 
-Health endpoint: \`/health\`
-Strategy endpoint: \`/api/strategy?symbol=XAUUSD\` (also \`USOIL\`, \`XAGUSD\`)
+The TradingView chart is a separate display feed and may not have identical candles or prices to the SiftingIO strategy feed.
 
 ## Strategy rules
 
-- D1 liquidity sweeps: PDH/PDL, PWH/PWL, PMH/PML, EQH/EQL and confirmed major swing highs/lows.
-- A valid sweep must pierce a level and close back inside it.
+- D1 liquidity sweeps: PDH/PDL, PWH/PWL, PMH/PML, EQH/EQL and confirmed major swing highs/lows. A D1 confirmation must occur after the sweep candle.
+- A valid sweep pierces a level and closes back inside it.
 - D1 confirmation: close beyond the previous D1 high/low, directional engulfing/rejection/displacement, or the specified three-candle inside-bar pattern.
-- H1 confirmation: a matching sweep of an earlier H1 candle high/low after the D1 confirmation, searching all earlier bars in the provider's returned H1 history (up to the requested 1,000-bar response).
-- Fibonacci is anchored to the entire H1 sweep candle high-low range, with the user's bullish/bearish 0 and 1 mapping.
-- M5 first entry is an intrabar touch of 0.5 on the latest/current M5 candle; old touches are not replayed as fresh entries.
-- M5 second entry requires a completed M5 candle to sweep 0.618 and close back across it; the most recent matching completed candle is reported.
-
-Requested stop-loss placements are preserved, but the engine marks a setup blocked when its stop is on the wrong side of entry. It does not send orders or guarantee that a setup is profitable.
+- H1 confirmation: a matching sweep of an earlier H1 candle high/low after D1 confirmation, searching the available H1 history.
+- Fibonacci is anchored to the entire H1 sweep candle high-low range. BUY: Fib 1 is the low and Fib 0 is the high. SELL: Fib 1 is the high and Fib 0 is the low.
+- M5 first entry: touch of Fib 0.5; BUY stop at Fib 0.618 below entry, SELL stop at Fib 0.618 above entry; target Fib 0.
+- M5 second entry: a completed M5 candle sweeps Fib 0.618 and closes back across it. Entry is at that candle close; BUY stop is that candle's low and SELL stop is its high; target Fib 0.
+- The maximum 4-pip ($0.40 quoted-price) stop-distance restriction applies only to Gold (XAUUSD) second entries. Silver (XAGUSD) and USOIL do not inherit this cap.
+- Risk validation checks stop-loss side, target side and the Gold-only distance restriction. Blocked levels remain visible for review; the app does not send orders or guarantee that a setup is profitable.
 
 ## Development
 
-From the repository root:
+Run the strategy tests:
 
-\`\`\`sh
+```sh
 node --test api/strategy.test.js
-node api/server.js
-\`\`\`
+```
 
-The strategy tests also run in GitHub Actions. The Android APK workflow is separate and is not automatically triggered.
+Start the API locally:
+
+```sh
+node api/server.js
+```
+
+The Android APK workflow is separate and is not automatically triggered by normal code commits.
