@@ -52,4 +52,4 @@ Start the API locally:
 node api/server.js
 ```
 
-The Android APK workflow is separate and is not automatically triggered by normal code commits.
+The Android APK workflow is separate and is not automatically triggered by normal code commits. The browser UI in `public/index.html` is kept byte-for-byte identical to the packaged WebView UI in `app/src/main/assets/index.html`; the strategy test suite checks this.
