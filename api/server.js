@@ -184,7 +184,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const market = await loadMarket(symbol);
-    const result = analyzeStrategy(market);
+    const result = analyzeStrategy({ ...market, symbol });
     return send(res, 200, {
       ok: true,
       symbol,
