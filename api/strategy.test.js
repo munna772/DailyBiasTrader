@@ -27,11 +27,10 @@ test('maps bullish and bearish Fibonacci anchors in the requested direction', ()
   assert.equal(bull['0'], 120);
   assert.equal(bull['1'], 100);
   assert.equal(bull['0.5'], 110);
-  assert.ok(Math.abs(bull['0.618'] - 112.36) < 1e-9);
+  assert.ok(Math.abs(bull['0.618'] - 107.64) < 1e-9);
   assert.equal(bear['0'], 100);
   assert.equal(bear['1'], 120);
-  assert.ok(Math.abs(bear['0.618'] - 107.64) < 1e-9);
-  assert.ok(Math.abs(bull['0.618'] - 112.36) < 1e-9);
+  assert.ok(Math.abs(bear['0.618'] - 112.36) < 1e-9);
 });
 
 test('detects a touch when the candle range includes the entry level', () => {
@@ -127,7 +126,7 @@ test('second M5 entry reports the latest completed 0.618 sweep, not the oldest h
 });
 
 
-test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
+test('first BUY entry uses 0.618 below entry as stop and 1 as target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T06:00:00', 109, 111, 108, 109);
   const entries = findM5Entries([current], 'bullish', current.time, fib, []);
@@ -138,7 +137,7 @@ test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
   assert.equal(first.stopValid, true);
 });
 
-test('first SELL entry uses 0.618 above entry as stop and 0 as target', () => {
+test('first SELL entry uses 0.618 above entry as stop and 1 as target', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const current = c('2026-11-10T06:00:00', 111, 112, 109, 111);
   const entries = findM5Entries([current], 'bearish', current.time, fib, []);
