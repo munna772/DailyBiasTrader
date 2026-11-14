@@ -24,13 +24,14 @@ test('recognizes a high-level rejection as a bearish liquidity sweep', () => {
 test('maps bullish and bearish Fibonacci anchors in the requested direction', () => {
   const candle = { high: 120, low: 100 };
   const bull = calculateFib(candle, 'bullish'), bear = calculateFib(candle, 'bearish');
-  assert.equal(bull['0'], 100);
-  assert.equal(bull['1'], 120);
+  assert.equal(bull['0'], 120);
+  assert.equal(bull['1'], 100);
   assert.equal(bull['0.5'], 110);
   assert.ok(Math.abs(bull['0.618'] - 112.36) < 1e-9);
-  assert.equal(bear['0'], 120);
-  assert.equal(bear['1'], 100);
+  assert.equal(bear['0'], 100);
+  assert.equal(bear['1'], 120);
   assert.ok(Math.abs(bear['0.618'] - 107.64) < 1e-9);
+  assert.ok(Math.abs(bull['0.618'] - 112.36) < 1e-9);
 });
 
 test('detects a touch when the candle range includes the entry level', () => {
