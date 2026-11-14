@@ -58,6 +58,7 @@ test('second entry preserves the specified candle-high stop for BUY and blocks i
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
   assert.equal(second.stopLoss, 115);
+  assert.equal(second.takeProfit, 120);
   assert.equal(second.stopValid, false);
   assert.equal(second.status, 'BLOCKED_INVALID_STOP_SIDE');
 });
