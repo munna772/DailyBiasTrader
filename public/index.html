@@ -299,6 +299,9 @@ async function refreshStrategy(){
       ? 'Strategy service timed out. A free Render service may be waking up, or the market-data provider may be slow; retry shortly.'
       : (error && error.message) || 'Could not reach the strategy service.';
     el('errorMessage').textContent = message;
+    el('riskWarning').textContent = '';
+    el('riskWarning').classList.add('hidden');
+    el('updatedAt').textContent = 'Last update failed';
     setMetric('dataStatus','UNAVAILABLE','bad');
     el('dataDetail').textContent = 'No live OHLC received';
     if(/key is not configured/i.test(message)){
