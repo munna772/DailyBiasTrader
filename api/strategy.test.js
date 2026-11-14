@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, isInsideThreeBullish, isInsideThreeBearish } = require('./strategy');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -99,6 +99,32 @@ test('Gold second-entry stop at or below $0.40 is allowed', () => {
   const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
   assert.equal(gold.stopDistance, 0.3);
   assert.equal(gold.stopValid, true);
+});
+
+test('D1 confirmation must occur after the liquidity-sweep candle', () => {
+  const bars = [];
+  for (let day = 1; day <= 7; day++) {
+    bars.push(c('2026-11-' + String(day).padStart(2, '0') + 'T00:00:00', 105, 110, 100, 106));
+  }
+  // This candle sweeps below the prior low and closes above the prior high.
+  // It must not confirm its own sweep; a later D1 candle is required.
+  bars.push(c('2026-11-08T00:00:00', 118, 120, 95, 115));
+  assert.equal(findDailyBias(bars).bias, 'WAITING');
+
+  bars.push(c('2026-11-09T00:00:00', 112, 123, 111, 122));
+  assert.equal(findDailyBias(bars).bias, 'BULLISH');
+});
+
+test('second entry is blocked when Fib 0 target is already behind the entry', () => {
+  const fib = { '0': 107, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const bars = [c('2026-11-10T05:00:00', 107.8, 109, 106, 108)];
+  const second = findM5Entries(bars, 'bullish', bars[0].time, fib)
+    .find(entry => entry.type === 'SECOND_ENTRY');
+  assert.ok(second);
+  assert.equal(second.stopSideValid, true);
+  assert.equal(second.takeProfitValid, false);
+  assert.equal(second.setupValid, false);
+  assert.equal(second.status, 'BLOCKED_INVALID_TARGET_SIDE');
 });
 
 test('recognizes the three-candle inside pattern in both directions', () => {
