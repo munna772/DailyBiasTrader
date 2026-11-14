@@ -115,18 +115,4 @@ loader.onload=function(){renderChart();};
 loader.onerror=function(){setStatus('FEED UNAVAILABLE',false);showMessage('TradingView script could not be downloaded. Check your internet connection.');};
 document.head.appendChild(loader);
 })();
-</script><script>
-(function(){
-let symbol='XAUUSD',interval='D',widget=null;
-const symbols={XAUUSD:'OANDA:XAUUSD',USOIL:'TVC:USOIL',XAGUSD:'OANDA:XAGUSD'};
-function render(){
-document.getElementById('symbolLabel').textContent=symbol;
-const host=document.getElementById('tv_chart');host.innerHTML='';
-if(!window.TradingView||!window.TradingView.widget){host.innerHTML='<div style="padding:18px;color:#ffd27b">TradingView could not load. Check your internet connection and reload.</div>';return;}
-widget=new TradingView.widget({autosize:true,symbol:symbols[symbol],interval:interval,timezone:'Etc/UTC',theme:'dark',style:'1',locale:'en',toolbar_bg:'#101a2b',enable_publishing:false,hide_top_toolbar:false,hide_legend:false,save_image:false,container_id:'tv_chart',backgroundColor:'#101a2b',gridColor:'#17253a',allow_symbol_change:true,details:false,hotlist:false,calendar:false,studies:[],overrides:{'mainSeriesProperties.candleStyle.upColor':'#38d996','mainSeriesProperties.candleStyle.downColor':'#ff647c','mainSeriesProperties.candleStyle.borderUpColor':'#38d996','mainSeriesProperties.candleStyle.borderDownColor':'#ff647c','mainSeriesProperties.candleStyle.wickUpColor':'#38d996','mainSeriesProperties.candleStyle.wickDownColor':'#ff647c'}});
-}
-document.getElementById('symbol').addEventListener('change',e=>{symbol=e.target.value;render()});
-document.querySelectorAll('#timeframes button').forEach(b=>b.addEventListener('click',()=>{interval=b.dataset.tf;document.querySelectorAll('#timeframes button').forEach(x=>x.classList.toggle('active',x===b));render()}));
-if(window.TradingView)render();else document.querySelector('script[src*="tv.js"]').addEventListener('load',render);
-})();
 </script></body></html>
