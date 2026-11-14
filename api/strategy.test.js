@@ -51,16 +51,54 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
   assert.equal(result.time, bars[3].time + 60 * 60 * 1000);
 });
 
-test('second entry preserves the specified candle-high stop for BUY and blocks its wrong side', () => {
+test('BUY second entry uses sweep candle close, wick-low stop, and Fib 0 target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 108, 115, 106, 108)];
+  const bars = [c('2026-11-10T05:00:00', 107, 109, 106, 108)];
   const entries = findM5Entries(bars, 'bullish', bars[0].time, fib);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
-  assert.equal(second.stopLoss, 115);
+  assert.equal(second.entry, 108);
+  assert.equal(second.stopLoss, 106);
   assert.equal(second.takeProfit, 120);
-  assert.equal(second.stopValid, false);
-  assert.equal(second.status, 'BLOCKED_INVALID_STOP_SIDE');
+  assert.equal(second.stopValid, true);
+  assert.equal(second.status, 'SETUP_DETECTED');
+});
+
+test('SELL second entry uses sweep candle close, wick-high stop, and Fib 0 target', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const bars = [c('2026-11-10T05:00:00', 113, 115, 111, 112)];
+  const entries = findM5Entries(bars, 'bearish', bars[0].time, fib);
+  const second = entries.find(e => e.type === 'SECOND_ENTRY');
+  assert.ok(second);
+  assert.equal(second.entry, 112);
+  assert.equal(second.stopLoss, 115);
+  assert.equal(second.takeProfit, 100);
+  assert.equal(second.stopValid, true);
+  assert.equal(second.status, 'SETUP_DETECTED');
+});
+
+test('4-pip ($0.40) maximum applies to Gold second entries only', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const bars = [c('2026-11-10T05:00:00', 107.8, 108.2, 107.2, 108)];
+  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
+  const silver = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAGUSD').find(e => e.type === 'SECOND_ENTRY');
+  const oil = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'USOIL').find(e => e.type === 'SECOND_ENTRY');
+  assert.equal(gold.stopDistance, 0.8);
+  assert.equal(gold.maxStopDistance, 0.4);
+  assert.equal(gold.stopValid, false);
+  assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
+  assert.equal(silver.maxStopDistance, null);
+  assert.equal(silver.stopValid, true);
+  assert.equal(oil.maxStopDistance, null);
+  assert.equal(oil.stopValid, true);
+});
+
+test('Gold second-entry stop at or below $0.40 is allowed', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const bars = [c('2026-11-10T05:00:00', 107.8, 108.1, 107.7, 108)];
+  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
+  assert.equal(gold.stopDistance, 0.3);
+  assert.equal(gold.stopValid, true);
 });
 
 test('recognizes the three-candle inside pattern in both directions', () => {
