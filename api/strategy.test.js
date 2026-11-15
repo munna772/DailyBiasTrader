@@ -223,7 +223,7 @@ test('BUY second entry uses sweep candle close, wick-low stop, and Fib 0 target'
 
 test('SELL second entry uses sweep candle close, wick-high stop, and Fib 0 target', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
-  const bars = [c('2026-11-10T05:00:00', 112.4, 112.39, 111, 112)];
+  const bars = [c('2026-11-10T05:00:00', 112.3, 112.39, 111, 112)];
   const entries = findM5Entries(bars, 'bearish', bars[0].time, fib);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
