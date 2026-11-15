@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -13,6 +14,87 @@ test('browser UI and Android APK UI stay identical', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
+});
+
+test('browser and Android trade statistics modules stay identical', () => {
+  const browserStats = fs.readFileSync(path.join(__dirname, '../public/trade-stats.js'), 'utf8');
+  const androidStats = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/trade-stats.js'), 'utf8');
+  assert.equal(androidStats, browserStats);
+});
+
+test('trade ledger records only valid setups and deduplicates repeated signals', () => {
+  const entries = [
+    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 100, stopLoss: 100.3, takeProfit: 99, setupValid: true },
+    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 100, stopLoss: 100.3, takeProfit: 99, setupValid: true },
+    { type: 'SECOND_ENTRY', direction: 'BUY', time: 2000, entry: 100, stopLoss: 101, takeProfit: 102, setupValid: false }
+  ];
+  const once = addSignalTrades([], 'XAUUSD', entries, 5000);
+  const twice = addSignalTrades(once, 'XAUUSD', entries, 6000);
+  assert.equal(once.length, 1);
+  assert.equal(twice.length, 1);
+  assert.equal(once[0].pipSize, 0.10);
+  assert.equal(once[0].status, 'OPEN');
+});
+
+test('BUY trade is counted as TP only on a candle after the entry candle', () => {
+  const trade = addSignalTrades([], 'XAUUSD', [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 100, stopLoss: 99.8, takeProfit: 101.2, setupValid: true }
+  ], 5000);
+  const sameEntryCandle = { time: 1000, high: 101.5, low: 99.5 };
+  const laterTargetCandle = { time: 301000, high: 101.3, low: 100.2 };
+  const stillOpen = resolveTrades(trade, 'XAUUSD', [sameEntryCandle]);
+  assert.equal(stillOpen[0].status, 'OPEN');
+  const resolved = resolveTrades(stillOpen, 'XAUUSD', [sameEntryCandle, laterTargetCandle]);
+  assert.equal(resolved[0].status, 'TP');
+  assert.equal(resolved[0].pipsWon, 12);
+  assert.equal(resolved[0].pipsLost, 0);
+});
+
+test('SELL trade counts stop-loss pips with the market pip size', () => {
+  const trade = addSignalTrades([], 'XAGUSD', [
+    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 25, stopLoss: 25.05, takeProfit: 24.5, setupValid: true }
+  ], 5000);
+  const resolved = resolveTrades(trade, 'XAGUSD', [
+    { time: 301000, high: 25.06, low: 24.9 }
+  ]);
+  assert.equal(resolved[0].status, 'SL');
+  assert.equal(resolved[0].pipsLost, 5);
+  assert.equal(resolved[0].pipsWon, 0);
+});
+
+test('ambiguous candle touching both TP and SL is conservatively counted as SL', () => {
+  const trade = addSignalTrades([], 'USOIL', [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 70, stopLoss: 69.9, takeProfit: 70.2, setupValid: true }
+  ], 5000);
+  const resolved = resolveTrades(trade, 'USOIL', [
+    { time: 301000, high: 70.25, low: 69.85 }
+  ]);
+  assert.equal(resolved[0].status, 'SL');
+  assert.equal(resolved[0].bothLevelsHitSameCandle, true);
+  assert.equal(resolved[0].pipsLost, 10);
+});
+
+test('trade summary counts TP, SL, open trades and net pips per selected market', () => {
+  const entries = [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 100, stopLoss: 99.8, takeProfit: 101.2, setupValid: true },
+    { type: 'SECOND_ENTRY', direction: 'SELL', time: 2000, entry: 100, stopLoss: 100.2, takeProfit: 99, setupValid: true }
+  ];
+  let ledger = addSignalTrades([], 'XAUUSD', entries, 5000);
+  ledger = resolveTrades(ledger, 'XAUUSD', [
+    { time: 301000, high: 101.3, low: 100.2 },
+    { time: 601000, high: 100.25, low: 99.5 }
+  ]);
+  ledger = addSignalTrades(ledger, 'XAUUSD', [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 3000, entry: 100, stopLoss: 99.8, takeProfit: 101.2, setupValid: true }
+  ], 7000);
+  const summary = summarizeTrades(ledger, 'XAUUSD');
+  assert.equal(summary.tpHits, 1);
+  assert.equal(summary.slHits, 1);
+  assert.equal(summary.openTrades, 1);
+  assert.equal(summary.pipsWon, 12);
+  assert.equal(summary.pipsLost, 2);
+  assert.equal(summary.netPips, 10);
+  assert.equal(summarizeTrades(ledger, 'XAGUSD').total, 0);
 });
 
 test('recognizes a low-level rejection as a bullish liquidity sweep', () => {
