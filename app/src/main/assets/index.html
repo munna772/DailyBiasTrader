@@ -135,6 +135,7 @@ let selectedInterval = 'D';
 let chartTimer = null;
 let chartGeneration = 0;
 let strategyBusy = false;
+let chartWasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
 let tradeStorageAvailable = true;
 let tradeLedger = loadTradeLedger();
@@ -158,6 +159,12 @@ function renderChart(){
   const generation = ++chartGeneration;
   if(chartTimer) clearTimeout(chartTimer);
   const host = el('tv_chart');
+  if(typeof navigator !== 'undefined' && navigator.onLine === false){
+    chartWasOffline = true;
+    clearElement(host);
+    showChartFailure('Your device reports that it is offline. Reconnect to the internet, then reload the chart. Strategy data is separate.');
+    return;
+  }
   clearElement(host);
   showChartMessage('Opening TradingView chart…', true);
   setChartStatus('LOADING CHART', false);
@@ -210,7 +217,7 @@ function renderChart(){
     showChartMessage('', false);
     // Cross-origin iframe isolation means this confirms the frame loaded,
     // not that the selected exchange supplied real-time data.
-    setChartStatus('CHART FRAME LOADED', true);
+    setChartStatus('CHART EMBED LOADED', true);
   }, {once:true});
   frame.addEventListener('error', function(){
     if(generation !== chartGeneration) return;
@@ -222,8 +229,11 @@ function renderChart(){
 
   chartTimer = setTimeout(function(){
     if(generation !== chartGeneration) return;
-    showChartFailure('TradingView did not finish loading within 30 seconds. Check whether the network or WebView is blocking TradingView.');
-  }, 30000);
+    const reason = typeof navigator !== 'undefined' && navigator.onLine === false
+      ? 'Your device reports that it is offline. Reconnect and reload the chart.'
+      : 'The TradingView embed did not respond within 60 seconds. The app cannot inspect the cross-origin chart itself, so this may be a network, browser, WebView, or TradingView loading issue. Strategy data is separate.';
+    showChartFailure(reason);
+  }, 60000);
 }
 function formatPrice(value){
   return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—';
@@ -449,6 +459,16 @@ document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
 });
 el('reloadChart').addEventListener('click',renderChart);
 el('refreshStrategy').addEventListener('click',refreshStrategy);
+window.addEventListener('offline',function(){
+  chartWasOffline = true;
+  if(chartTimer) clearTimeout(chartTimer);
+  showChartFailure('Your device reports that it is offline. The strategy API may also be unreachable until the connection returns.');
+});
+window.addEventListener('online',function(){
+  if(!chartWasOffline) return;
+  chartWasOffline = false;
+  renderChart();
+});
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden) refreshStrategy();
 });
