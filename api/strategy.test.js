@@ -6,6 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
+const { buildSeriesUrl } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -441,4 +442,28 @@ test('freshness state is initialized before entry detail reads it in both UIs', 
     assert.ok(stateIndex >= 0 && readIndex >= 0);
     assert.ok(stateIndex < readIndex, 'dataStale must be initialized before it is read');
   }
+});
+
+test('SiftingIO history requests fetch a wide enough window and newest bars first', () => {
+  const now = Date.parse('2026-11-15T14:34:00.000Z');
+  const m5 = buildSeriesUrl('XAUUSD', '5m', 500, now);
+  assert.equal(m5.searchParams.get('interval'), '5m');
+  assert.equal(m5.searchParams.get('limit'), '500');
+  assert.equal(m5.searchParams.get('order'), 'desc');
+  assert.equal(Date.parse(m5.searchParams.get('end')), now);
+  assert.equal(now - Date.parse(m5.searchParams.get('start')), 500 * 5 * 60 * 1000 * 20);
+  assert.ok(now - Date.parse(m5.searchParams.get('start')) > 30 * 24 * 60 * 60 * 1000);
+
+  const h1 = buildSeriesUrl('XAUUSD', '1h', 1000, now);
+  assert.equal(h1.searchParams.get('order'), 'desc');
+  assert.equal(now - Date.parse(h1.searchParams.get('start')), 1000 * 60 * 60 * 1000 * 4);
+
+  const d1 = buildSeriesUrl('XAUUSD', '1d', 350, now);
+  assert.equal(d1.searchParams.get('order'), 'desc');
+  assert.equal(now - Date.parse(d1.searchParams.get('start')), 350 * 24 * 60 * 60 * 1000 * 2);
+});
+
+test('SiftingIO history URL rejects unsupported intervals and invalid limits', () => {
+  assert.throws(() => buildSeriesUrl('XAUUSD', '15m', 100, Date.now()), /Unsupported SiftingIO interval/);
+  assert.throws(() => buildSeriesUrl('XAUUSD', '5m', 2500, Date.now()), /limit must be an integer/);
 });
