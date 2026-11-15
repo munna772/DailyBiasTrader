@@ -32,6 +32,11 @@ select{font-size:13px}
 .notice.warn{color:#ffd27b}
 #tv_chart{height:440px;min-height:360px;width:100%;overflow:hidden;border-radius:10px;background:#0b1423;position:relative}
 #tv_chart iframe{display:block;width:100%;height:100%;border:0;background:#0b1423}
+.trade-history-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #1b2a3d;font-size:12px}
+.trade-history-row:last-child{border:0}
+.trade-history-row .meta{color:var(--muted);font-size:10px;margin-top:3px}
+.trade-history-row .result{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.stats-net{font-size:12px;margin-top:10px}
 .tradingview-widget-container,.tradingview-widget-container__widget{height:100%;width:100%}
 #chartMessage{padding:12px 10px;color:var(--amber);line-height:1.5;min-height:42px}
 .levels,.entry-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #1b2a3d;font-size:12px}
@@ -93,6 +98,24 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   <div id="entries" class="notice">No entry detected. No sample or synthetic prices are shown.</div>
 </section>
 
+<section class="panel" id="tradeStatsPanel">
+  <div class="row">
+    <div><div class="section-title">STRATEGY TRADE STATISTICS</div><div class="sub" id="statsMarket">XAUUSD • saved on this device</div></div>
+    <span class="pill">PAPER TRACKING</span>
+  </div>
+  <div class="grid">
+    <div class="metric"><small>TP HITS</small><b class="good" id="tpHits">0</b></div>
+    <div class="metric"><small>SL HITS</small><b class="bad" id="slHits">0</b></div>
+    <div class="metric"><small>PIPS WON</small><b class="good" id="pipsWon">0.00</b></div>
+    <div class="metric"><small>PIPS LOST</small><b class="bad" id="pipsLost">0.00</b></div>
+    <div class="metric"><small>OPEN / UNRESOLVED</small><b class="wait" id="openTrades">0</b></div>
+  </div>
+  <div class="stats-net" id="netPips">Net: 0.00 pips</div>
+  <div class="section-title" style="margin-top:14px">RECENT STRATEGY TRADES</div>
+  <div id="tradeHistory" class="notice">No valid strategy trades have been tracked yet.</div>
+  <div class="notice" id="statsNote" style="margin-top:10px">Only valid strategy setups are tracked. Results are evaluated from completed M5 candles and are not broker execution records.</div>
+</section>
+
 <section class="panel">
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
@@ -101,6 +124,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
 </main>
+<script src="trade-stats.js"></script>
 <script>
 (function(){
 'use strict';
@@ -111,6 +135,9 @@ let selectedInterval = 'D';
 let chartTimer = null;
 let chartGeneration = 0;
 let strategyBusy = false;
+const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
+let tradeStorageAvailable = true;
+let tradeLedger = loadTradeLedger();
 
 const el = id => document.getElementById(id);
 function clearElement(node){ while(node.firstChild) node.removeChild(node.firstChild); }
@@ -211,6 +238,83 @@ function setMetric(id, text, state){
   node.textContent = text;
   node.className = state || 'wait';
 }
+function loadTradeLedger(){
+  try{
+    const saved = localStorage.getItem(TRADE_LEDGER_KEY);
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(error){
+    tradeStorageAvailable = false;
+    return [];
+  }
+}
+function saveTradeLedger(){
+  try{
+    localStorage.setItem(TRADE_LEDGER_KEY,JSON.stringify(tradeLedger));
+    tradeStorageAvailable = true;
+  }catch(error){
+    tradeStorageAvailable = false;
+  }
+}
+function renderTradeStats(){
+  const api = window.DailyBiasTradeStats;
+  if(!api) return;
+  const summary = api.summarizeTrades(tradeLedger,selectedSymbol);
+  el('statsMarket').textContent = selectedSymbol + ' • saved on this device';
+  el('tpHits').textContent = String(summary.tpHits);
+  el('slHits').textContent = String(summary.slHits);
+  el('pipsWon').textContent = summary.pipsWon.toFixed(2);
+  el('pipsLost').textContent = summary.pipsLost.toFixed(2);
+  el('openTrades').textContent = String(summary.openTrades);
+  el('netPips').textContent = 'Net: ' + (summary.netPips > 0 ? '+' : '') + summary.netPips.toFixed(2) + ' pips';
+  el('netPips').style.color = summary.netPips > 0 ? '#38d996' : summary.netPips < 0 ? '#ff647c' : '#8292aa';
+
+  const history = el('tradeHistory');
+  clearElement(history);
+  const recent = tradeLedger.filter(trade => trade && trade.symbol === selectedSymbol)
+    .sort((a,b) => Number(b.entryTime) - Number(a.entryTime)).slice(0,8);
+  if(!recent.length){
+    history.textContent = 'No valid strategy trades have been tracked yet.';
+  }else{
+    recent.forEach(trade => {
+      const row = document.createElement('div');
+      row.className = 'trade-history-row';
+      const left = document.createElement('div');
+      const title = document.createElement('b');
+      title.textContent = trade.direction + ' • ' + (trade.type === 'SECOND_ENTRY' ? 'SECOND ENTRY' : 'FIRST ENTRY');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = formatTime(trade.entryTime) + ' • Entry ' + formatPrice(trade.entry);
+      left.append(title,meta);
+      const right = document.createElement('div');
+      right.className = 'result';
+      const state = document.createElement('b');
+      state.textContent = trade.status === 'TP' ? 'TP HIT' : trade.status === 'SL' ? 'SL HIT' : 'OPEN';
+      state.className = trade.status === 'TP' ? 'good' : trade.status === 'SL' ? 'bad' : 'wait';
+      const pips = document.createElement('div');
+      pips.className = 'meta';
+      pips.textContent = trade.status === 'TP' ? '+' + Number(trade.pipsWon || 0).toFixed(2) + ' pips' :
+        trade.status === 'SL' ? '-' + Number(trade.pipsLost || 0).toFixed(2) + ' pips' : 'Waiting for TP / SL';
+      right.append(state,pips);
+      row.append(left,right);
+      history.appendChild(row);
+    });
+  }
+  const pipSize = summary.pipSize;
+  el('statsNote').textContent =
+    'Tracks valid strategy signals only; older trades are not backfilled. Outcomes use completed SiftingIO M5 candles, not broker fills. Pip-size assumptions: ' +
+    selectedSymbol + ' = ' + (pipSize ? pipSize.toFixed(2) : 'unknown') +
+    ' quoted-price units per pip. If one M5 candle touches both SL and TP, it is conservatively counted as SL because OHLC cannot show which was first.' +
+    (tradeStorageAvailable ? ' Saved locally on this device.' : ' Local storage is unavailable; this session may not persist.');
+}
+function updateTradeLedger(m5Closed, entries){
+  const api = window.DailyBiasTradeStats;
+  if(!api) return;
+  tradeLedger = api.resolveTrades(tradeLedger,selectedSymbol,m5Closed);
+  tradeLedger = api.addSignalTrades(tradeLedger,selectedSymbol,entries,Date.now());
+  saveTradeLedger();
+  renderTradeStats();
+}
 function renderFib(fib){
   const target = el('fibLevels');
   if(!fib){ target.innerHTML = '<div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div>'; return; }
@@ -281,6 +385,7 @@ async function refreshStrategy(){
     const s = payload.strategy || {};
     const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
+    updateTradeLedger(payload.m5Closed || [],s.entries || []);
     setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
     el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
@@ -331,6 +436,7 @@ async function refreshStrategy(){
 el('symbol').addEventListener('change',function(event){
   selectedSymbol = event.target.value;
   el('symbolLabel').textContent = selectedSymbol;
+  renderTradeStats();
   renderChart();
   refreshStrategy();
 });
@@ -346,6 +452,7 @@ el('refreshStrategy').addEventListener('click',refreshStrategy);
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden) refreshStrategy();
 });
+renderTradeStats();
 renderChart();
 refreshStrategy();
 setInterval(function(){ if(!document.hidden) refreshStrategy(); },60000);
