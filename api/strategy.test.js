@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 
 function c(time, open, high, low, close) {
@@ -95,6 +95,30 @@ test('trade summary counts TP, SL, open trades and net pips per selected market'
   assert.equal(summary.pipsLost, 2);
   assert.equal(summary.netPips, 10);
   assert.equal(summarizeTrades(ledger, 'XAGUSD').total, 0);
+});
+
+test('historical M5 replay reuses the strategy first and second entry rules', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const bars = [
+    c('2026-11-10T05:00:00', 111, 111, 109, 110.5),
+    c('2026-11-10T05:05:00', 110.5, 111, 110.1, 110.5),
+    c('2026-11-10T05:10:00', 112.5, 113, 111, 112)
+  ];
+  const entries = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib, 'XAGUSD');
+  assert.equal(entries.filter(entry => entry.type === 'FIRST_ENTRY').length, 1);
+  assert.equal(entries.filter(entry => entry.type === 'SECOND_ENTRY').length, 1);
+  assert.equal(entries.find(entry => entry.type === 'SECOND_ENTRY').entry, 112);
+  assert.equal(entries.find(entry => entry.type === 'SECOND_ENTRY').stopLoss, 113);
+});
+
+test('historical Gold second entries still obey the 4-pip stop cap', () => {
+  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
+  const bars = [c('2026-11-10T05:10:00', 112.5, 113, 111, 112)];
+  const gold = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib, 'XAUUSD')
+    .find(entry => entry.type === 'SECOND_ENTRY');
+  assert.ok(gold);
+  assert.equal(gold.setupValid, false);
+  assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
 });
 
 test('recognizes a low-level rejection as a bullish liquidity sweep', () => {
