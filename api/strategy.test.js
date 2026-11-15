@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
-const { addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
+const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
+const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -14,6 +15,19 @@ test('browser UI and Android APK UI stay identical', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
+  assert.match(browserUi, /XAUUSD · GOLD/);
+  assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
+});
+
+test('API supports Gold only and defaults safely to XAUUSD', () => {
+  assert.deepEqual(Object.keys(SUPPORTED_SYMBOLS), ['XAUUSD']);
+  assert.equal(DEFAULT_SYMBOL, 'XAUUSD');
+  assert.equal(normalizeSymbol(null), 'XAUUSD');
+  assert.equal(normalizeSymbol(''), 'XAUUSD');
+  assert.equal(normalizeSymbol('xauusd'), 'XAUUSD');
+  assert.equal(normalizeSymbol('XAGUSD'), null);
+  assert.equal(normalizeSymbol('USOIL'), null);
+  assert.equal(normalizeSymbol('EURUSD'), null);
 });
 
 test('chart loading timeout is longer and network recovery is wired in both UIs', () => {
