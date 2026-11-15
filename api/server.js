@@ -194,6 +194,9 @@ const server = http.createServer(async (req, res) => {
       fetchedAt: new Date(market.fetchedAt).toISOString(),
       dataFreshness: freshness,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
+      // Closed M5 history lets the client resolve previously recorded strategy setups.
+      // The UI only uses candles after each trade's entry candle.
+      m5Closed: market.m5Closed,
       strategy: result
     });
   } catch (error) {
