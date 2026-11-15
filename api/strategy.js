@@ -346,6 +346,22 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
   return entries.sort((a, b) => a.time - b.time);
 }
 
+function findHistoricalM5Entries(rawBars, side, sweepTime, fib, symbol = null) {
+  const bars = normalizeCandles(rawBars).filter(candle => candle.time >= sweepTime);
+  const found = [];
+  for (const candle of bars) {
+    // Reuse the live entry detector for each completed historical candle.
+    // Each bar is treated as the latest bar at that point in the replay.
+    found.push(...findM5Entries([candle], side, sweepTime, fib, [candle], symbol));
+  }
+  const unique = new Map();
+  for (const entry of found) {
+    const key = [entry.type, entry.direction, entry.time, entry.entry, entry.stopLoss, entry.takeProfit].join('|');
+    if (!unique.has(key)) unique.set(key, entry);
+  }
+  return [...unique.values()].sort((a, b) => a.time - b.time || a.type.localeCompare(b.type));
+}
+
 function assessMarketDataFreshness(rawBars, now = Date.now()) {
   const bars = normalizeCandles(rawBars);
   if (!bars.length) {
@@ -415,7 +431,7 @@ function analyzeStrategy(input) {
 
 module.exports = {
   normalizeCandles, buildDailyLevels, findSweep, dailyConfirmation, findDailyBias,
-  findHourlySweep, calculateFib, candleTouches, findM5Entries, analyzeStrategy,
+  findHourlySweep, calculateFib, candleTouches, findM5Entries, findHistoricalM5Entries, analyzeStrategy,
   isInsideThreeBullish, isInsideThreeBearish,
   assessMarketDataFreshness, gateStrategyOnFreshness
 };
