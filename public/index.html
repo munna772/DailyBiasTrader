@@ -250,7 +250,12 @@ function loadTradeLedger(){
   try{
     const saved = localStorage.getItem(TRADE_LEDGER_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if(!Array.isArray(parsed)) return [];
+    const goldOnly = parsed.filter(trade => trade && trade.symbol === 'XAUUSD');
+    if(goldOnly.length !== parsed.length){
+      localStorage.setItem(TRADE_LEDGER_KEY,JSON.stringify(goldOnly));
+    }
+    return goldOnly;
   }catch(error){
     tradeStorageAvailable = false;
     return [];
