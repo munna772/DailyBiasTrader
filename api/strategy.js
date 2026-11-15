@@ -271,7 +271,7 @@ function calculateFib(sweep, side) {
 
 function candleTouches(candle, price) { return candle.low <= price && candle.high >= price; }
 
-function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, symbol = null) {
+function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
   const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
@@ -317,10 +317,10 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
     const stopDistance = Math.abs(entry - stop);
     const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
     const takeProfitValid = side === 'bullish' ? takeProfit > entry : takeProfit < entry;
-    // The Gold-only 4-pip rule is represented as a $0.40 quoted-price distance.
-    // Silver and USOIL do not inherit this cap.
-    const maxStopDistance = String(symbol || '').toUpperCase() === 'XAUUSD' ? 0.40 : null;
-    const withinStopLimit = maxStopDistance === null || stopDistance <= maxStopDistance + 1e-10;
+    // Gold is the only supported market, so every second entry enforces the
+    // strategy's 4-pip ($0.40 quoted-price) maximum stop distance.
+    const maxStopDistance = 0.40;
+    const withinStopLimit = stopDistance <= maxStopDistance + 1e-10;
     const stopValid = stopSideValid && withinStopLimit;
     const setupValid = stopValid && takeProfitValid;
     const status = !stopSideValid
@@ -346,13 +346,13 @@ function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, s
   return entries.sort((a, b) => a.time - b.time);
 }
 
-function findHistoricalM5Entries(rawBars, side, sweepTime, fib, symbol = null) {
+function findHistoricalM5Entries(rawBars, side, sweepTime, fib) {
   const bars = normalizeCandles(rawBars).filter(candle => candle.time >= sweepTime);
   const found = [];
   for (const candle of bars) {
     // Reuse the live entry detector for each completed historical candle.
     // Each bar is treated as the latest bar at that point in the replay.
-    found.push(...findM5Entries([candle], side, sweepTime, fib, [candle], symbol));
+    found.push(...findM5Entries([candle], side, sweepTime, fib, [candle]));
   }
   const unique = new Map();
   for (const entry of found) {
@@ -403,7 +403,7 @@ function analyzeStrategy(input) {
     return { bias: daily.bias, biasReason: daily.reason, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
   }
   const fib = calculateFib(h1Sweep.candle, side);
-  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5, input.symbol);
+  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
   const blockedEntries = entries.filter(entry => !entry.setupValid);
   const blocked = blockedEntries.length > 0;
   const riskIssues = [];
