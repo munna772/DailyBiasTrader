@@ -8,7 +8,7 @@
 
   // Pip sizes are quoted-price units. Gold's 0.10 matches the app's
   // existing rule that a 0.40 stop distance equals 4 pips.
-  const PIP_SIZES = Object.freeze({ XAUUSD: 0.10, XAGUSD: 0.01, USOIL: 0.01 });
+  const PIP_SIZES = Object.freeze({ XAUUSD: 0.10 });
   const MAX_RECORDED_TRADES = 500;
 
   function roundPips(value) {
@@ -74,6 +74,7 @@
 
   function resolveTrades(existingTrades, symbol, rawClosedCandles) {
     const market = String(symbol || '').toUpperCase();
+    if (!PIP_SIZES[market]) return Array.isArray(existingTrades) ? existingTrades.slice() : [];
     const candles = (Array.isArray(rawClosedCandles) ? rawClosedCandles : [])
       .map(candle => ({
         time: Number(candle && candle.time),
@@ -123,7 +124,9 @@
 
   function summarizeTrades(trades, symbol) {
     const market = String(symbol || '').toUpperCase();
-    const selected = (Array.isArray(trades) ? trades : []).filter(trade => trade && trade.symbol === market);
+    const selected = PIP_SIZES[market]
+      ? (Array.isArray(trades) ? trades : []).filter(trade => trade && trade.symbol === market)
+      : [];
     const tpHits = selected.filter(trade => trade.status === 'TP').length;
     const slHits = selected.filter(trade => trade.status === 'SL').length;
     const openTrades = selected.filter(trade => trade.status === 'OPEN').length;
