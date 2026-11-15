@@ -302,7 +302,7 @@ function renderTradeStats(){
   }
   const pipSize = summary.pipSize;
   el('statsNote').textContent =
-    'Tracks valid strategy signals only; older trades are not backfilled. Outcomes use completed SiftingIO M5 candles, not broker fills. Pip-size assumptions: ' +
+    'Tracks valid setups from the active D1/H1 sequence within the available M5 history (up to 500 closed candles). Older setups outside that history may be missing. Outcomes use SiftingIO candles, not broker fills. Pip-size assumptions: ' +
     selectedSymbol + ' = ' + (pipSize ? pipSize.toFixed(2) : 'unknown') +
     ' quoted-price units per pip. If one M5 candle touches both SL and TP, it is conservatively counted as SL because OHLC cannot show which was first.' +
     (tradeStorageAvailable ? ' Saved locally on this device.' : ' Local storage is unavailable; this session may not persist.');
@@ -310,8 +310,8 @@ function renderTradeStats(){
 function updateTradeLedger(m5Closed, entries){
   const api = window.DailyBiasTradeStats;
   if(!api) return;
-  tradeLedger = api.resolveTrades(tradeLedger,selectedSymbol,m5Closed);
   tradeLedger = api.addSignalTrades(tradeLedger,selectedSymbol,entries,Date.now());
+  tradeLedger = api.resolveTrades(tradeLedger,selectedSymbol,m5Closed);
   saveTradeLedger();
   renderTradeStats();
 }
@@ -385,7 +385,7 @@ async function refreshStrategy(){
     const s = payload.strategy || {};
     const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
-    updateTradeLedger(payload.m5Closed || [],s.entries || []);
+    updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
     el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
