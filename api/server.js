@@ -2,7 +2,7 @@
 
 const http = require('node:http');
 const { URL } = require('node:url');
-const { analyzeStrategy, normalizeCandles, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { analyzeStrategy, normalizeCandles, assessMarketDataFreshness, gateStrategyOnFreshness, findHistoricalM5Entries } = require('./strategy');
 
 const PORT = Number(process.env.PORT || 10000);
 const API_KEY = process.env.DAILY_BIAS_TRADER || process.env.SIFTING_API_KEY || '';
@@ -185,7 +185,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const market = await loadMarket(symbol);
     const freshness = assessMarketDataFreshness(market.m5);
-    const result = gateStrategyOnFreshness(analyzeStrategy({ ...market, symbol }), freshness);
+    const rawStrategy = analyzeStrategy({ ...market, symbol });
+    const result = gateStrategyOnFreshness(rawStrategy, freshness);
+    const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
+    const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
+      ? findHistoricalM5Entries(market.m5Closed, strategySide, rawStrategy.h1Sweep.time, rawStrategy.fib, symbol)
+      : [];
     return send(res, 200, {
       ok: true,
       symbol,
@@ -197,6 +202,7 @@ const server = http.createServer(async (req, res) => {
       // Closed M5 history lets the client resolve previously recorded strategy setups.
       // The UI only uses candles after each trade's entry candle.
       m5Closed: market.m5Closed,
+      historicalEntries,
       strategy: result
     });
   } catch (error) {
