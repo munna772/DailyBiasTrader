@@ -3,15 +3,11 @@
 const http = require('node:http');
 const { URL } = require('node:url');
 const { analyzeStrategy, normalizeCandles, assessMarketDataFreshness, gateStrategyOnFreshness, findHistoricalM5Entries } = require('./strategy');
+const { SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 
 const PORT = Number(process.env.PORT || 10000);
 const API_KEY = process.env.DAILY_BIAS_TRADER || process.env.SIFTING_API_KEY || '';
 const PROVIDER = 'SiftingIO';
-const SYMBOLS = Object.freeze({
-  XAUUSD: 'XAUUSD',
-  XAGUSD: 'XAGUSD',
-  USOIL: 'WTIUSD'
-});
 const CACHE_TTL_MS = 120000;
 const cache = new Map();
 const rateBuckets = new Map();
@@ -121,7 +117,7 @@ async function loadMarket(symbolKey) {
   const cached = cache.get(symbolKey);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
-  const providerSymbol = SYMBOLS[symbolKey];
+  const providerSymbol = SUPPORTED_SYMBOLS[symbolKey];
   const [dailyRaw, hourlyRaw, fiveMinuteRaw] = await Promise.all([
     fetchSeries(providerSymbol, '1d', 350),
     fetchSeries(providerSymbol, '1h', 1000),
@@ -169,7 +165,7 @@ const server = http.createServer(async (req, res) => {
       service: 'dailybiastrader-api',
       provider: PROVIDER,
       feedConfigured: Boolean(API_KEY),
-      supportedMarkets: Object.keys(SYMBOLS),
+      supportedMarkets: Object.keys(SUPPORTED_SYMBOLS),
       timestamp: new Date().toISOString()
     });
   }
@@ -178,9 +174,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (!allowRate(req)) return send(res, 429, { error: 'Too many requests. Please wait before refreshing.' });
 
-  const symbol = String(url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
-  if (!Object.prototype.hasOwnProperty.call(SYMBOLS, symbol)) {
-    return send(res, 400, { error: 'Unsupported market. Use XAUUSD, XAGUSD, or USOIL.' });
+  const symbol = normalizeSymbol(url.searchParams.get('symbol'));
+  if (!symbol) {
+    return send(res, 400, { error: 'This app supports XAUUSD (Gold) only.' });
   }
   try {
     const market = await loadMarket(symbol);
