@@ -15,7 +15,8 @@ test('browser UI and Android APK UI stay identical', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
-  assert.match(browserUi, /XAUUSD · GOLD/);
+  assert.ok(browserUi.includes('id="symbolLabel">XAUUSD'));
+  assert.ok(browserUi.includes('GOLD ONLY'));
   assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
 });
 
@@ -209,12 +210,12 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
 
 test('BUY second entry uses sweep candle close, wick-low stop, and Fib 0 target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107, 109, 106, 108)];
+  const bars = [c('2026-11-10T05:00:00', 107.7, 109, 107.63, 108)];
   const entries = findM5Entries(bars, 'bullish', bars[0].time, fib);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
   assert.equal(second.entry, 108);
-  assert.equal(second.stopLoss, 106);
+  assert.equal(second.stopLoss, 107.63);
   assert.equal(second.takeProfit, 120);
   assert.equal(second.stopValid, true);
   assert.equal(second.status, 'SETUP_DETECTED');
@@ -222,12 +223,12 @@ test('BUY second entry uses sweep candle close, wick-low stop, and Fib 0 target'
 
 test('SELL second entry uses sweep candle close, wick-high stop, and Fib 0 target', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
-  const bars = [c('2026-11-10T05:00:00', 113, 115, 111, 112)];
+  const bars = [c('2026-11-10T05:00:00', 112.4, 112.39, 111, 112)];
   const entries = findM5Entries(bars, 'bearish', bars[0].time, fib);
   const second = entries.find(e => e.type === 'SECOND_ENTRY');
   assert.ok(second);
   assert.equal(second.entry, 112);
-  assert.equal(second.stopLoss, 115);
+  assert.equal(second.stopLoss, 112.39);
   assert.equal(second.takeProfit, 100);
   assert.equal(second.stopValid, true);
   assert.equal(second.status, 'SETUP_DETECTED');
