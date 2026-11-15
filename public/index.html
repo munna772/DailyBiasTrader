@@ -136,8 +136,8 @@ let chartTimer = null;
 let chartGeneration = 0;
 let strategyBusy = false;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
-let tradeLedger = loadTradeLedger();
 let tradeStorageAvailable = true;
+let tradeLedger = loadTradeLedger();
 
 const el = id => document.getElementById(id);
 function clearElement(node){ while(node.firstChild) node.removeChild(node.firstChild); }
