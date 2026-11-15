@@ -61,6 +61,22 @@ test('trade ledger records only valid setups and deduplicates repeated signals',
   assert.equal(once[0].status, 'OPEN');
 });
 
+test('trade statistics accept Gold only and ignore legacy Silver/Oil rows', () => {
+  assert.deepEqual(Object.keys(PIP_SIZES), ['XAUUSD']);
+  const entries = [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 100, stopLoss: 99.8, takeProfit: 101, setupValid: true }
+  ];
+  assert.equal(addSignalTrades([], 'XAGUSD', entries, 5000).length, 0);
+  assert.equal(addSignalTrades([], 'USOIL', entries, 5000).length, 0);
+  const legacy = [
+    { symbol: 'XAGUSD', status: 'TP', pipsWon: 20 },
+    { symbol: 'USOIL', status: 'SL', pipsLost: 30 }
+  ];
+  assert.deepEqual(resolveTrades(legacy, 'XAGUSD', []).map(row => row.status), ['TP', 'SL']);
+  assert.equal(summarizeTrades(legacy, 'XAGUSD').total, 0);
+  assert.equal(summarizeTrades(legacy, 'USOIL').total, 0);
+});
+
 test('BUY trade is counted as TP only on a candle after the entry candle', () => {
   const trade = addSignalTrades([], 'XAUUSD', [
     { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 100, stopLoss: 99.8, takeProfit: 101.2, setupValid: true }
@@ -140,7 +156,7 @@ test('historical M5 replay reuses the strategy first and second entry rules', ()
 test('historical Gold second entries still obey the 4-pip stop cap', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const bars = [c('2026-11-10T05:10:00', 112.5, 113, 111, 112)];
-  const gold = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib, 'XAUUSD')
+  const gold = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib)
     .find(entry => entry.type === 'SECOND_ENTRY');
   assert.ok(gold);
   assert.equal(gold.setupValid, false);
@@ -217,26 +233,20 @@ test('SELL second entry uses sweep candle close, wick-high stop, and Fib 0 targe
   assert.equal(second.status, 'SETUP_DETECTED');
 });
 
-test('4-pip ($0.40) maximum applies to Gold second entries only', () => {
+test('Gold-only second-entry strategy always enforces the 4-pip ($0.40) stop cap', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const bars = [c('2026-11-10T05:00:00', 107.8, 108.2, 107.2, 108)];
-  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
-  const silver = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAGUSD').find(e => e.type === 'SECOND_ENTRY');
-  const oil = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'USOIL').find(e => e.type === 'SECOND_ENTRY');
+  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars).find(e => e.type === 'SECOND_ENTRY');
   assert.ok(Math.abs(gold.stopDistance - 0.8) < 1e-9);
   assert.equal(gold.maxStopDistance, 0.4);
   assert.equal(gold.stopValid, false);
   assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
-  assert.equal(silver.maxStopDistance, null);
-  assert.equal(silver.stopValid, true);
-  assert.equal(oil.maxStopDistance, null);
-  assert.equal(oil.stopValid, true);
 });
 
 test('Gold second-entry stop at or below $0.40 is allowed', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const bars = [c('2026-11-10T05:00:00', 107.8, 108.1, 107.63, 108.03)];
-  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars, 'XAUUSD').find(e => e.type === 'SECOND_ENTRY');
+  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars).find(e => e.type === 'SECOND_ENTRY');
   assert.ok(gold);
   assert.ok(Math.abs(gold.stopDistance - 0.4) < 1e-9);
   assert.equal(gold.stopValid, true);
