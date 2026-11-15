@@ -16,6 +16,17 @@ test('browser UI and Android APK UI stay identical', () => {
   assert.equal(androidUi, browserUi);
 });
 
+test('chart loading timeout is longer and network recovery is wired in both UIs', () => {
+  for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.ok(source.includes('}, 60000);'), 'chart timeout should allow 60 seconds');
+    assert.ok(source.includes("window.addEventListener('offline'"));
+    assert.ok(source.includes("window.addEventListener('online'"));
+    assert.ok(source.includes('CHART EMBED LOADED'));
+    assert.ok(source.includes('cross-origin chart itself'));
+  }
+});
+
 test('browser and Android trade statistics modules stay identical', () => {
   const browserStats = fs.readFileSync(path.join(__dirname, '../public/trade-stats.js'), 'utf8');
   const androidStats = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/trade-stats.js'), 'utf8');
