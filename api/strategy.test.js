@@ -75,24 +75,24 @@ test('BUY trade is counted as TP only on a candle after the entry candle', () =>
   assert.equal(resolved[0].pipsLost, 0);
 });
 
-test('SELL trade counts stop-loss pips with the market pip size', () => {
-  const trade = addSignalTrades([], 'XAGUSD', [
-    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 25, stopLoss: 25.05, takeProfit: 24.5, setupValid: true }
+test('Gold SELL trade counts stop-loss pips using the Gold pip size', () => {
+  const trade = addSignalTrades([], 'XAUUSD', [
+    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 25, stopLoss: 25.5, takeProfit: 24.5, setupValid: true }
   ], 5000);
-  const resolved = resolveTrades(trade, 'XAGUSD', [
-    { time: 301000, high: 25.06, low: 24.9 }
+  const resolved = resolveTrades(trade, 'XAUUSD', [
+    { time: 301000, high: 25.6, low: 24.9 }
   ]);
   assert.equal(resolved[0].status, 'SL');
   assert.equal(resolved[0].pipsLost, 5);
   assert.equal(resolved[0].pipsWon, 0);
 });
 
-test('ambiguous candle touching both TP and SL is conservatively counted as SL', () => {
-  const trade = addSignalTrades([], 'USOIL', [
-    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 70, stopLoss: 69.9, takeProfit: 70.2, setupValid: true }
+test('ambiguous Gold candle touching both TP and SL is conservatively counted as SL', () => {
+  const trade = addSignalTrades([], 'XAUUSD', [
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 70, stopLoss: 69, takeProfit: 72, setupValid: true }
   ], 5000);
-  const resolved = resolveTrades(trade, 'USOIL', [
-    { time: 301000, high: 70.25, low: 69.85 }
+  const resolved = resolveTrades(trade, 'XAUUSD', [
+    { time: 301000, high: 72.5, low: 68.5 }
   ]);
   assert.equal(resolved[0].status, 'SL');
   assert.equal(resolved[0].bothLevelsHitSameCandle, true);
@@ -120,6 +120,7 @@ test('trade summary counts TP, SL, open trades and net pips per selected market'
   assert.equal(summary.pipsLost, 2);
   assert.equal(summary.netPips, 10);
   assert.equal(summarizeTrades(ledger, 'XAGUSD').total, 0);
+  assert.equal(summarizeTrades(ledger, 'USOIL').total, 0);
 });
 
 test('historical M5 replay reuses the strategy first and second entry rules', () => {
@@ -129,7 +130,7 @@ test('historical M5 replay reuses the strategy first and second entry rules', ()
     c('2026-11-10T05:05:00', 110.5, 111, 110.1, 110.5),
     c('2026-11-10T05:10:00', 112.5, 113, 111, 112)
   ];
-  const entries = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib, 'XAGUSD');
+  const entries = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib);
   assert.equal(entries.filter(entry => entry.type === 'FIRST_ENTRY').length, 1);
   assert.equal(entries.filter(entry => entry.type === 'SECOND_ENTRY').length, 1);
   assert.equal(entries.find(entry => entry.type === 'SECOND_ENTRY').entry, 112);
