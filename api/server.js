@@ -72,16 +72,37 @@ function parseSiftingBars(response) {
   })));
 }
 
-async function fetchSeries(symbol, interval, outputsize) {
-  const now = Date.now();
-  const intervalMs = interval === '1d' ? 86400000 : interval === '1h' ? 3600000 : 300000;
-  const start = new Date(now - outputsize * intervalMs).toISOString();
+// These multipliers convert the requested bar count into a calendar lookback
+// wide enough to span normal market closures, weekends, and holidays.
+// order=desc is essential: SiftingIO otherwise defaults to oldest-first, so
+// a wide window plus a small page limit can return old candles instead of
+// the latest candles required by the live strategy.
+const HISTORY_INTERVALS = Object.freeze({
+  '1d': { milliseconds: 24 * 60 * 60 * 1000, calendarMultiplier: 2 },
+  '1h': { milliseconds: 60 * 60 * 1000, calendarMultiplier: 4 },
+  '5m': { milliseconds: 5 * 60 * 1000, calendarMultiplier: 20 }
+});
+
+function buildSeriesUrl(symbol, interval, outputsize, now = Date.now()) {
+  const config = HISTORY_INTERVALS[interval];
+  if (!config) throw new TypeError('Unsupported SiftingIO interval: ' + interval);
+  if (!Number.isInteger(outputsize) || outputsize < 1 || outputsize > 2000) {
+    throw new RangeError('SiftingIO bar limit must be an integer from 1 to 2000.');
+  }
+  const endTime = Number(now);
+  if (!Number.isFinite(endTime)) throw new TypeError('Invalid SiftingIO request timestamp.');
+  const start = new Date(endTime - outputsize * config.milliseconds * config.calendarMultiplier).toISOString();
   const url = new URL('https://api.sifting.io/v1/hist/commodities/' + encodeURIComponent(symbol) + '/bars');
   url.searchParams.set('interval', interval);
   url.searchParams.set('start', start);
-  url.searchParams.set('end', new Date(now).toISOString());
+  url.searchParams.set('end', new Date(endTime).toISOString());
+  url.searchParams.set('order', 'desc');
   url.searchParams.set('limit', String(outputsize));
+  return url;
+}
 
+async function fetchSeries(symbol, interval, outputsize) {
+  const url = buildSeriesUrl(symbol, interval, outputsize);
   let response;
   try {
     response = await fetch(url, {
@@ -212,6 +233,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('DailyBiasTrader API listening on port ' + PORT);
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log('DailyBiasTrader API listening on port ' + PORT);
+  });
+}
+
+module.exports = { buildSeriesUrl, parseSiftingBars };
