@@ -488,6 +488,8 @@ async function refreshStrategy(){
     latestDataFreshness = freshness;
     renderBarCountdown();
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
+    const h1Freshness = payload.h1Freshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null, latestCandleCloseAt: null };
+    const h1DataStale = h1Freshness.stale === true || h1Freshness.status === 'STALE' || h1Freshness.status === 'NO_DATA' || h1Freshness.status === 'UNKNOWN';
     updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     const d1Sweep = s.d1Sweep || null;
     const isManualBias = s.biasMode === 'MANUAL';
@@ -515,18 +517,35 @@ async function refreshStrategy(){
     } else {
       el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     }
-    setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
-    el('h1Detail').textContent = s.h1Sweep
-      ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
-      : isManualBias
-        ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep whose candle closes after ' + formatTime(manualSince) + '. ' + (Number(s.h1BarsChecked || 0) === 0 ? 'No eligible completed H1 candles yet.' : 'Checked ' + s.h1BarsChecked + ' eligible completed H1 candle(s); none matched yet.') + ' Candles already closed before that time are ignored.'
-        : 'Requires matching H1 sweep after D1 confirmation';
+    const normalH1State = s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' ');
+    const h1DisplayState = h1DataStale
+      ? (s.h1Status === 'CONFIRMED' ? 'CONFIRMED • STALE' : h1Freshness.status === 'NO_DATA' ? 'NO H1 DATA' : 'STALE H1 DATA')
+      : normalH1State;
+    setMetric('h1', h1DisplayState, h1DataStale ? 'bad' : s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
+    if(h1DataStale){
+      const latestH1Open = h1Freshness.latestCandleAt ? formatTime(h1Freshness.latestCandleAt) : 'unavailable';
+      const latestH1Close = h1Freshness.latestCandleCloseAt ? formatTime(h1Freshness.latestCandleCloseAt) : 'unavailable';
+      const h1Age = h1Freshness.ageMinutes === null ? 'age unknown' : h1Freshness.ageMinutes + ' min since close';
+      const sweepHistory = s.h1Sweep ? 'A matching H1 sweep exists in the returned history at ' + formatTime(s.h1Sweep.time) + '. ' : 'No matching sweep can be verified from fresh H1 data. ';
+      el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
+        (isManualBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
+        sweepHistory + 'Wait for fresh H1 candles. Missing data is not treated as proof that no sweep occurred.';
+    } else {
+      el('h1Detail').textContent = s.h1Sweep
+        ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
+        : isManualBias
+          ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep whose candle closes after ' + formatTime(manualSince) + '. ' + (Number(s.h1BarsChecked || 0) === 0 ? 'No eligible completed H1 candles yet.' : 'Checked ' + s.h1BarsChecked + ' eligible completed H1 candle(s); none matched yet.') + ' Candles already closed before that time are ignored.'
+          : 'Requires matching H1 sweep after D1 confirmation';
+    }
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
-    setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
-    el('entryDetail').textContent = dataStale && s.h1Status === 'CONFIRMED' ? 'No fresh M5 data; entry signals are paused' : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
+    setMetric('entry', dataStale ? 'PAUSED — STALE DATA' : entryState, dataStale ? 'bad' : entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
+    const latestM5Close = freshness.latestCandleAt ? new Date(Date.parse(freshness.latestCandleAt) + 5 * 60 * 1000).toISOString() : null;
+    el('entryDetail').textContent = dataStale
+      ? 'Paused: latest completed M5 candle closed at ' + (latestM5Close ? formatTime(latestM5Close) : 'unavailable') + ' (' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min ago') + '). Entry conditions are not evaluated on stale M5 data.'
+      : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
     setMetric('dataStatus', dataStale ? 'STALE' : 'CONNECTED', dataStale ? 'bad' : 'good');
     const freshnessText = freshness.latestCandleAt
-      ? 'M5 ' + formatTime(freshness.latestCandleAt) + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
+      ? 'M5 opened ' + formatTime(freshness.latestCandleAt) + ' • closed ' + (latestM5Close ? formatTime(latestM5Close) : 'unknown') + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
       : 'No M5 timestamp available';
     el('dataDetail').textContent = 'D1 ' + payload.candles.d1 + ' • H1 ' + payload.candles.h1 + ' • M5 ' + payload.candles.m5 + ' • ' + freshnessText;
     const m5Fallback = payload.m5Fallback || {};
