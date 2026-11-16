@@ -169,6 +169,20 @@ function buildFiveMinuteBarsFromOneMinute(rawBars, now = Date.now()) {
   return normalizeCandles(result);
 }
 
+function latestBarTimestamp(bars) {
+  const normalized = normalizeCandles(bars);
+  const latest = normalized[normalized.length - 1];
+  return latest ? new Date(latest.time).toISOString() : null;
+}
+
+function buildLatestBarTimes(dailyBars, hourlyBars, fiveMinuteBars) {
+  return {
+    D1: latestBarTimestamp(dailyBars),
+    H1: latestBarTimestamp(hourlyBars),
+    M5: latestBarTimestamp(fiveMinuteBars)
+  };
+}
+
 function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
   const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
   const fallbackBars = buildFiveMinuteBarsFromOneMinute(minuteBars, now);
@@ -238,6 +252,7 @@ async function loadMarket(symbolKey) {
     m5Closed: completedOnly(usableFiveMinuteRaw, 5 * 60 * 1000, now),
     m5Source: m5Fallback.addedBars ? 'SiftingIO 5m + complete SiftingIO 1m aggregates' : 'SiftingIO 5m',
     m5Fallback,
+    barTimes: buildLatestBarTimes(dailyRaw, hourlyRaw, usableFiveMinuteRaw),
     source: PROVIDER,
     providerSymbol,
     fetchedAt: now,
@@ -307,6 +322,7 @@ const server = http.createServer(async (req, res) => {
       source: market.source,
       fetchedAt: new Date(market.fetchedAt).toISOString(),
       dataFreshness: freshness,
+      barTimes: market.barTimes,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
       m5Source: market.m5Source,
       m5Fallback: market.m5Fallback,
@@ -333,4 +349,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes };
