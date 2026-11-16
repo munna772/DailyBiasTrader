@@ -6,13 +6,13 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars } = require('./server');
+const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
 }
 
-test('browser UI and Android APK UI stay identical and expose manual D1 bias', () => {
+test('browser UI and Android APK UI stay identical and expose manual D1 bias and bar countdown', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
@@ -22,6 +22,10 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias', (
   assert.ok(browserUi.includes('MANUAL BULLISH'));
   assert.ok(browserUi.includes('MANUAL BEARISH'));
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
+  assert.ok(browserUi.includes('id="barCountdownValue"'));
+  assert.ok(browserUi.includes('payload.barTimes'));
+  assert.ok(browserUi.includes('latestDataFreshness.stale'));
+  assert.ok(browserUi.includes('SiftingIO candle timestamp'));
   assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
 });
 
@@ -529,6 +533,19 @@ test('SiftingIO history requests fetch a wide enough window and newest bars firs
   const d1 = buildSeriesUrl('XAUUSD', '1d', 350, now);
   assert.equal(d1.searchParams.get('order'), 'desc');
   assert.equal(now - Date.parse(d1.searchParams.get('start')), 350 * 24 * 60 * 60 * 1000 * 2);
+});
+
+
+test('bar countdown receives latest real D1, H1 and M5 timestamps and preserves missing data', () => {
+  const d1 = [c('2026-11-14T21:00:00', 100, 101, 99, 100.5), c('2026-11-15T21:00:00', 100.5, 102, 100, 101)];
+  const h1 = [c('2026-11-16T08:00:00', 101, 102, 100, 101.5), c('2026-11-16T09:00:00', 101.5, 103, 101, 102)];
+  const m5 = [c('2026-11-16T09:05:00', 102, 102.5, 101.5, 102.2), c('2026-11-16T09:10:00', 102.2, 103, 102, 102.8)];
+  assert.deepEqual(buildLatestBarTimes(d1, h1, m5), {
+    D1: new Date(d1[1].time).toISOString(),
+    H1: new Date(h1[1].time).toISOString(),
+    M5: new Date(m5[1].time).toISOString()
+  });
+  assert.deepEqual(buildLatestBarTimes([], [], []), { D1: null, H1: null, M5: null });
 });
 
 test('SiftingIO history URL rejects unsupported intervals and invalid limits', () => {
