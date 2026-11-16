@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes } = require('./server');
+const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -22,6 +22,9 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL BULLISH'));
   assert.ok(browserUi.includes('MANUAL BEARISH'));
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
+  assert.ok(browserUi.includes('STALE H1 DATA'));
+  assert.ok(browserUi.includes('PAUSED — STALE DATA'));
+  assert.ok(browserUi.includes('latest completed M5 candle closed at'));
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
@@ -522,6 +525,35 @@ test('M5 freshness is based on the latest candle close, not API fetch time', () 
   assert.equal(staleStatus.ageMinutes, 35);
 });
 
+test('H1 freshness uses completed H1 close times and marks old history stale', () => {
+  const now = Date.parse('2026-11-16T15:30:00Z');
+  const freshBars = [
+    c('2026-11-16T14:00:00', 10, 11, 9, 10.5),
+    c('2026-11-16T15:00:00', 10.5, 11.5, 10, 11)
+  ];
+  const fresh = assessH1DataFreshness(freshBars, now);
+  assert.equal(fresh.status, 'FRESH');
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.ageMinutes, 30);
+  assert.equal(fresh.latestCandleAt, new Date(freshBars[0].time).toISOString());
+  assert.equal(fresh.latestCandleCloseAt, new Date(freshBars[0].time + 60 * 60 * 1000).toISOString());
+
+  const staleBars = [c('2026-11-16T12:59:00', 10, 11, 9, 10.5)];
+  const stale = assessH1DataFreshness(staleBars, now);
+  assert.equal(stale.status, 'STALE');
+  assert.equal(stale.stale, true);
+  assert.equal(stale.ageMinutes, 91);
+});
+
+test('H1 freshness ignores a still-open H1 candle and reports missing completed data', () => {
+  const now = Date.parse('2026-11-16T15:30:00Z');
+  const onlyOpen = [c('2026-11-16T15:00:00', 10, 11, 9, 10.5)];
+  const result = assessH1DataFreshness(onlyOpen, now);
+  assert.equal(result.status, 'NO_DATA');
+  assert.equal(result.stale, true);
+  assert.equal(result.latestCandleCloseAt, null);
+});
+
 test('no M5 candles are reported as missing data', () => {
   const result = assessMarketDataFreshness([], Date.parse('2026-11-14T15:10:00Z'));
   assert.equal(result.status, 'NO_DATA');
@@ -550,13 +582,19 @@ test('fresh M5 data preserves the strategy result unchanged', () => {
 });
 
 
-test('freshness state is initialized before entry detail reads it in both UIs', () => {
+test('freshness state gates H1 and M5 UI statuses in both UIs', () => {
   for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
     const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    const stateIndex = source.indexOf('const dataStale =');
-    const readIndex = source.indexOf('dataStale && s.h1Status');
-    assert.ok(stateIndex >= 0 && readIndex >= 0);
-    assert.ok(stateIndex < readIndex, 'dataStale must be initialized before it is read');
+    const m5StateIndex = source.indexOf('const dataStale =');
+    const h1StateIndex = source.indexOf('const h1Freshness = payload.h1Freshness');
+    const h1StatusIndex = source.indexOf("setMetric('h1', h1DisplayState");
+    const entryStatusIndex = source.indexOf("setMetric('entry', dataStale ? 'PAUSED — STALE DATA'");
+    assert.ok(m5StateIndex >= 0 && h1StateIndex > m5StateIndex);
+    assert.ok(h1StatusIndex > h1StateIndex);
+    assert.ok(entryStatusIndex > m5StateIndex);
+    assert.ok(source.includes('STALE H1 DATA'));
+    assert.ok(source.includes('PAUSED — STALE DATA'));
+    assert.ok(source.includes('Missing data is not treated as proof that no sweep occurred.'));
   }
 });
 
