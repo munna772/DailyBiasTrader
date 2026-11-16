@@ -134,7 +134,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 <section class="panel">
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
-  <p class="notice">H1 confirmation searches for a matching H1 candle sweep after D1 confirmation. In MANUAL D1 BIAS mode, automatic D1 confirmation is bypassed and H1 searches only from the time you apply the manual bias. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
+  <p class="notice">H1 confirmation searches for a matching H1 candle sweep after D1 confirmation. In MANUAL D1 BIAS mode, automatic D1 confirmation is bypassed. H1 confirmation uses completed candles whose close time is after you apply the manual bias; a candle already closed before then is excluded. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
   <p class="notice">M5 first entry: touch of 0.5; SL at 0.618 and TP at 0. BUY stop must be below entry; SELL stop must be above entry. Second entry: wait for a completed M5 candle to sweep 0.618 and close back across it; enter at that candle close, with BUY SL at its low or SELL SL at its high; TP remains Fib 0. The 4-pip ($0.40 quoted-price) stop-distance cap applies only to Gold second entries.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
@@ -498,7 +498,7 @@ async function refreshStrategy(){
     if(isManualBias){
       el('biasDetail').textContent = 'Manual ' + s.bias.toLowerCase() +
         ' bias applied at ' + formatTime(manualSince) +
-        '. Automatic D1 confirmation is bypassed; the app is searching for a matching H1 sweep from this time onward.';
+        '. Automatic D1 confirmation is bypassed; the app is checking completed H1 candles that close after this time.';
     } else if (s.bias === 'WAITING' && d1Sweep) {
       const bullishSweep = d1Sweep.side === 'bullish';
       const confirmationRule = bullishSweep
@@ -519,7 +519,7 @@ async function refreshStrategy(){
     el('h1Detail').textContent = s.h1Sweep
       ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
       : isManualBias
-        ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep after ' + formatTime(manualSince) + '. Earlier H1 sweeps are ignored.'
+        ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep whose candle closes after ' + formatTime(manualSince) + '. ' + (Number(s.h1BarsChecked || 0) === 0 ? 'No eligible completed H1 candles yet.' : 'Checked ' + s.h1BarsChecked + ' eligible completed H1 candle(s); none matched yet.') + ' Candles already closed before that time are ignored.'
         : 'Requires matching H1 sweep after D1 confirmation';
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
@@ -582,7 +582,7 @@ function syncManualBiasControls(){
   el('manualD1Bias').value = manualD1Bias ? manualD1Bias.bias : 'AUTO';
   el('manualBiasNote').textContent = manualD1Bias
     ? 'MANUAL ' + manualD1Bias.bias + ' active since ' + formatTime(manualD1Bias.since) +
-      '. Automatic D1 confirmation is bypassed. Only a matching H1 sweep formed after this selection can confirm.'
+      '. Automatic D1 confirmation is bypassed. Only a matching H1 candle closing after this selection can confirm.'
     : 'AUTO: D1 bias is calculated from the D1 liquidity-sweep and confirmation rules.';
 }
 el('applyManualD1Bias').addEventListener('click',function(){
