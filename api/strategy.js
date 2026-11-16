@@ -399,7 +399,22 @@ function gateStrategyOnFreshness(strategy, freshness) {
 
 function analyzeStrategy(input) {
   const d1 = normalizeCandles(input.d1), h1 = normalizeCandles(input.h1), m5 = normalizeCandles(input.m5);
-  const daily = findDailyBias(d1);
+  const requestedManualBias = String(input.manualBias || '').toUpperCase();
+  const manualBias = requestedManualBias === 'BULLISH' || requestedManualBias === 'BEARISH' ? requestedManualBias : null;
+  const manualBiasSince = Number(input.manualBiasSince);
+  const useManualBias = Boolean(manualBias && Number.isFinite(manualBiasSince) && manualBiasSince > 0);
+  const daily = useManualBias
+    ? {
+        bias: manualBias,
+        reason: 'Manual D1 bias selected by user',
+        sweep: null,
+        confirmation: { pattern: 'Manual D1 bias', time: manualBiasSince },
+        manual: true
+      }
+    : findDailyBias(d1);
+  const biasMetadata = daily.manual
+    ? { biasMode: 'MANUAL', manualBiasSince: daily.confirmation.time }
+    : { biasMode: 'AUTO' };
   if (daily.bias === 'WAITING') {
     return {
       bias: daily.bias,
@@ -409,6 +424,7 @@ function analyzeStrategy(input) {
       d1BarsAfterSweep: Number(daily.barsAfterSweep || 0),
       h1Status: 'WAITING_FOR_D1',
       entryStatus: 'DISABLED',
+      biasMode: 'AUTO',
       fib: null,
       entries: [],
       riskWarning: null,
@@ -418,7 +434,7 @@ function analyzeStrategy(input) {
   const side = daily.bias === 'BULLISH' ? 'bullish' : 'bearish';
   const h1Sweep = findHourlySweep(h1, side, daily.confirmation.time);
   if (!h1Sweep) {
-    return { bias: daily.bias, biasReason: daily.reason, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
+    return { bias: daily.bias, biasReason: daily.reason, ...biasMetadata, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
   }
   const fib = calculateFib(h1Sweep.candle, side);
   const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
@@ -435,7 +451,7 @@ function analyzeStrategy(input) {
     riskIssues.push('a Gold second-entry stop exceeds the 4-pip ($0.40 quoted-price) maximum');
   }
   return {
-    bias: daily.bias, biasReason: daily.reason, h1Status: 'CONFIRMED',
+    bias: daily.bias, biasReason: daily.reason, ...biasMetadata, h1Status: 'CONFIRMED',
     entryStatus: entries.length ? (blocked ? 'SETUP_BLOCKED_BY_RISK_RULE' : 'ENTRY_DETECTED') : 'WAITING_FOR_M5',
     daily,
     h1Sweep: { level: h1Sweep.level, time: h1Sweep.time, candle: h1Sweep.candle, lookbackBars: h1Sweep.lookbackBars },
