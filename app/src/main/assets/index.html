@@ -411,9 +411,17 @@ async function refreshStrategy(){
       ? 'M5 ' + formatTime(freshness.latestCandleAt) + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
       : 'No M5 timestamp available';
     el('dataDetail').textContent = 'D1 ' + payload.candles.d1 + ' • H1 ' + payload.candles.h1 + ' • M5 ' + payload.candles.m5 + ' • ' + freshnessText;
+    const m5Fallback = payload.m5Fallback || {};
+    const m5FallbackNote = !m5Fallback.attempted ? '' : (
+      m5Fallback.addedBars > 0
+        ? 'Recovered ' + m5Fallback.addedBars + ' completed M5 candle(s) from five consecutive real SiftingIO 1m candles.'
+        : m5Fallback.error
+          ? 'The 1m fallback request failed: ' + m5Fallback.error
+          : 'The 1m fallback found no complete newer 5-minute bucket. Latest 1m timestamp: ' + (m5Fallback.latestM1At ? formatTime(m5Fallback.latestM1At) : 'unavailable') + '. No partial or artificial candle was created.'
+    );
     el('providerNote').textContent = dataStale
-      ? 'SiftingIO returned historical candles, but the latest M5 data is stale. The market may be closed or the provider may be delayed; old entries are hidden. TradingView chart data is independent.'
-      : 'Strategy candles: ' + payload.source + ' (' + payload.providerSymbol + '). M5 data is recent. Chart candles remain sourced independently from TradingView.';
+      ? 'SiftingIO returned historical candles, but its latest completed M5 candle is still older than 15 minutes. Entry signals remain paused. ' + m5FallbackNote + ' TradingView chart data is independent.'
+      : 'Strategy candles: ' + payload.source + ' (' + payload.providerSymbol + '). M5 source: ' + (payload.m5Source || 'SiftingIO 5m') + '. Chart candles remain sourced independently from TradingView. ' + m5FallbackNote;
     el('updatedAt').textContent = 'Last API update: ' + formatTime(payload.fetchedAt) + ' Dhaka time';
     if (dataStale) el('errorMessage').textContent = 'No recent M5 candle. The market may be closed or the provider data delayed; this is not by itself proof that the API is offline.';
     el('riskWarning').textContent = s.riskWarning || '';
