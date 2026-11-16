@@ -178,7 +178,7 @@ function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
     merged.set(bar.time, bar);
     added += 1;
   }
-  return { bars: normalizeCandles([...merged.values()]), added, fallbackBars };
+  return { bars: normalizeCandles([...merged.values()]).slice(-500), added, fallbackBars };
 }
 
 async function loadMarket(symbolKey) {
