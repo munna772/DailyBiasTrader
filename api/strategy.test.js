@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars } = require('./server');
@@ -519,4 +519,28 @@ test('one-minute fallback adds newer M5 bars without overwriting provider M5 can
   assert.equal(merged.bars[0].close, 94);
   assert.equal(merged.bars[1].time, start + 300000);
   assert.equal(assessMarketDataFreshness(merged.bars, start + 600000).stale, false);
+});
+
+test('D1 pending sweep details are retained and distinguish sweep from confirmation', () => {
+  const bars = [];
+  for (let day = 1; day <= 7; day++) {
+    bars.push(c('2026-11-' + String(day).padStart(2, '0') + 'T00:00:00', 105, 110, 100, 106));
+  }
+  bars.push(c('2026-11-08T00:00:00', 118, 120, 95, 115));
+  const result = analyzeStrategy({ d1: bars, h1: [], m5: [] });
+  assert.equal(result.bias, 'WAITING');
+  assert.equal(result.h1Status, 'WAITING_FOR_D1');
+  assert.equal(result.d1Sweep.side, 'bullish');
+  assert.equal(result.d1Sweep.levelName, 'PDL');
+  assert.equal(result.d1Sweep.time, bars[7].time);
+  assert.match(result.biasReason, /no confirmation yet/i);
+});
+
+test('D1 waiting UI explains the later completed-candle confirmation rule in both apps', () => {
+  for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.ok(source.includes('later completed D1 candle must close above the previous D1 high'));
+    assert.ok(source.includes('The sweep candle itself cannot confirm its own sweep.'));
+    assert.ok(source.includes('d1Sweep.levelName'));
+  }
 });
