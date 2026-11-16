@@ -25,6 +25,12 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
   assert.ok(browserUi.includes('latest completed M5 candle closed at'));
+  assert.ok(browserUi.includes('Run fake H1 + M5 confirmations'));
+  assert.ok(browserUi.includes('DEMO TEST ONLY'));
+  assert.ok(browserUi.includes('No trade is added to statistics'));
+  assert.ok(browserUi.includes('renderDemoConfirmations'));
+  assert.ok(browserUi.includes('SIMULATED: a matching bullish H1 sweep'));
+  assert.ok(browserUi.includes('SIMULATED: an M5 confirmation'));
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
