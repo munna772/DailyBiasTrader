@@ -274,7 +274,7 @@ test('manual bullish D1 bias bypasses D1 scan and starts H1 search at selection 
   assert.equal(result.bias, 'BULLISH');
   assert.equal(result.biasMode, 'MANUAL');
   assert.equal(result.h1Status, 'CONFIRMED');
-  assert.equal(result.h1Sweep.candleTime, h1[2].time);
+  assert.equal(result.h1Sweep.candle.time, h1[2].time);
   assert.equal(result.entryStatus, 'WAITING_FOR_M5');
 });
 
@@ -294,7 +294,7 @@ test('manual bearish D1 bias searches only matching H1 sweeps after selection', 
   assert.equal(result.bias, 'BEARISH');
   assert.equal(result.biasMode, 'MANUAL');
   assert.equal(result.h1Status, 'CONFIRMED');
-  assert.equal(result.h1Sweep.candleTime, h1[2].time);
+  assert.equal(result.h1Sweep.candle.time, h1[2].time);
 });
 
 test('manual bias ignores an H1 sweep that occurred before the user selected it', () => {
