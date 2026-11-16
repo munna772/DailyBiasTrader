@@ -533,6 +533,7 @@ test('D1 pending sweep details are retained and distinguish sweep from confirmat
   assert.equal(result.d1Sweep.side, 'bullish');
   assert.equal(result.d1Sweep.levelName, 'PDL');
   assert.equal(result.d1Sweep.time, bars[7].time);
+  assert.equal(result.d1BarsAfterSweep, 0);
   assert.match(result.biasReason, /no confirmation yet/i);
 });
 
@@ -542,5 +543,7 @@ test('D1 waiting UI explains the later completed-candle confirmation rule in bot
     assert.ok(source.includes('later completed D1 candle must close above the previous D1 high'));
     assert.ok(source.includes('The sweep candle itself cannot confirm its own sweep.'));
     assert.ok(source.includes('d1Sweep.levelName'));
+    assert.ok(source.includes('No later completed D1 candle is available yet.'));
+    assert.ok(source.includes("'SWEEP DETECTED'"));
   }
 });
