@@ -222,7 +222,13 @@ function findDailyBias(rawBars) {
     }
   }
   if (!confirmation) {
-    return { bias: 'WAITING', reason: 'Latest ' + latestEvent.side + ' D1 sweep has no confirmation yet', sweep: latestEvent, confirmation: null };
+    return {
+      bias: 'WAITING',
+      reason: 'Latest ' + latestEvent.side + ' D1 sweep has no confirmation yet',
+      sweep: latestEvent,
+      confirmation: null,
+      barsAfterSweep: Math.max(0, bars.length - latestEvent.index - 1)
+    };
   }
   return {
     bias: latestEvent.side === 'bullish' ? 'BULLISH' : 'BEARISH',
@@ -400,6 +406,7 @@ function analyzeStrategy(input) {
       biasReason: daily.reason,
       d1Sweep: daily.sweep || null,
       d1Confirmation: daily.confirmation || null,
+      d1BarsAfterSweep: Number(daily.barsAfterSweep || 0),
       h1Status: 'WAITING_FOR_D1',
       entryStatus: 'DISABLED',
       fib: null,
