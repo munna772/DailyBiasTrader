@@ -73,7 +73,17 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 </section>
 
 <section class="panel">
-  <div class="row"><div class="section-title">AUTOMATIC STRATEGY STATUS</div><button id="refreshStrategy">Refresh signals</button></div>
+  <div class="row"><div class="section-title">STRATEGY STATUS</div><button id="refreshStrategy">Refresh signals</button></div>
+  <div class="row" style="margin:2px 0 8px;justify-content:flex-start;flex-wrap:wrap">
+    <label for="manualD1Bias" class="sub" style="margin-right:3px">D1 BIAS MODE</label>
+    <select id="manualD1Bias" aria-label="D1 bias mode">
+      <option value="AUTO">AUTO</option>
+      <option value="BULLISH">MANUAL BULLISH</option>
+      <option value="BEARISH">MANUAL BEARISH</option>
+    </select>
+    <button id="applyManualD1Bias">Apply</button>
+  </div>
+  <div class="notice" id="manualBiasNote" style="margin-bottom:10px">AUTO: D1 bias is calculated from the D1 liquidity-sweep and confirmation rules.</div>
   <div class="grid">
     <div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING FOR FEED</b><div class="sub" id="biasDetail">No calculation yet</div></div>
     <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">Requires D1 bias</div></div>
@@ -117,7 +127,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 <section class="panel">
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
-  <p class="notice">H1 confirmation searches earlier H1 candle highs/lows for a matching sweep after D1 confirmation. The implementation searches all earlier H1 candles returned by the market-data provider. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
+  <p class="notice">H1 confirmation searches for a matching H1 candle sweep after D1 confirmation. In MANUAL D1 BIAS mode, automatic D1 confirmation is bypassed and H1 searches only from the time you apply the manual bias. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
   <p class="notice">M5 first entry: touch of 0.5; SL at 0.618 and TP at 0. BUY stop must be below entry; SELL stop must be above entry. Second entry: wait for a completed M5 candle to sweep 0.618 and close back across it; enter at that candle close, with BUY SL at its low or SELL SL at its high; TP remains Fib 0. The 4-pip ($0.40 quoted-price) stop-distance cap applies only to Gold second entries.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
@@ -135,6 +145,21 @@ let chartGeneration = 0;
 let strategyBusy = false;
 let chartWasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
+const MANUAL_D1_BIAS_KEY = 'dailybiastrader_manual_d1_bias_v1';
+let strategyRefreshPending = false;
+function loadManualD1Bias(){
+  try{
+    const raw = localStorage.getItem(MANUAL_D1_BIAS_KEY);
+    if(!raw) return null;
+    const saved = JSON.parse(raw);
+    if(saved && (saved.bias === 'BULLISH' || saved.bias === 'BEARISH') &&
+       Number.isFinite(Number(saved.since)) && Number(saved.since) > 0) {
+      return {bias:saved.bias,since:Number(saved.since)};
+    }
+  }catch(error){}
+  return null;
+}
+let manualD1Bias = loadManualD1Bias();
 let tradeStorageAvailable = true;
 let tradeLedger = loadTradeLedger();
 
@@ -387,7 +412,12 @@ async function refreshStrategy(){
   const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const requestTimeout = setTimeout(function(){ if(requestController) requestController.abort(); },35000);
   try{
-    const response = await fetch(API_BASE + '/api/strategy?symbol=' + encodeURIComponent(selectedSymbol), {
+    let strategyUrl = API_BASE + '/api/strategy?symbol=' + encodeURIComponent(selectedSymbol);
+    if(manualD1Bias){
+      strategyUrl += '&manualBias=' + encodeURIComponent(manualD1Bias.bias) +
+        '&manualBiasSince=' + encodeURIComponent(String(manualD1Bias.since));
+    }
+    const response = await fetch(strategyUrl, {
       method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:requestController ? requestController.signal : undefined
     });
     const payload = await response.json().catch(() => ({}));
@@ -400,10 +430,16 @@ async function refreshStrategy(){
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     const d1Sweep = s.d1Sweep || null;
+    const isManualBias = s.biasMode === 'MANUAL';
+    const manualSince = Number(s.manualBiasSince || (manualD1Bias && manualD1Bias.since) || 0);
     setMetric('bias',
       s.bias === 'WAITING' && d1Sweep ? 'SWEEP DETECTED' : (s.bias || 'WAITING'),
       s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
-    if (s.bias === 'WAITING' && d1Sweep) {
+    if(isManualBias){
+      el('biasDetail').textContent = 'Manual ' + s.bias.toLowerCase() +
+        ' bias applied at ' + formatTime(manualSince) +
+        '. Automatic D1 confirmation is bypassed; the app is searching for a matching H1 sweep from this time onward.';
+    } else if (s.bias === 'WAITING' && d1Sweep) {
       const bullishSweep = d1Sweep.side === 'bullish';
       const confirmationRule = bullishSweep
         ? 'a later completed D1 candle must close above the previous D1 high, or form a bullish engulfing, rejection, displacement, or the specified 3-candle inside-bar pattern'
@@ -420,7 +456,11 @@ async function refreshStrategy(){
       el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     }
     setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
-    el('h1Detail').textContent = s.h1Sweep ? 'Sweep candle: ' + formatTime(s.h1Sweep.time) : 'Requires matching H1 sweep after D1';
+    el('h1Detail').textContent = s.h1Sweep
+      ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
+      : isManualBias
+        ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep after ' + formatTime(manualSince) + '. Earlier H1 sweeps are ignored.'
+        : 'Requires matching H1 sweep after D1 confirmation';
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     setMetric('entry', entryState, entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
     el('entryDetail').textContent = dataStale && s.h1Status === 'CONFIRMED' ? 'No fresh M5 data; entry signals are paused' : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
@@ -470,8 +510,32 @@ async function refreshStrategy(){
     clearTimeout(requestTimeout);
     strategyBusy = false;
     el('refreshStrategy').disabled = false;
+    if(strategyRefreshPending){
+      strategyRefreshPending = false;
+      refreshStrategy();
+    }
   }
 }
+function syncManualBiasControls(){
+  el('manualD1Bias').value = manualD1Bias ? manualD1Bias.bias : 'AUTO';
+  el('manualBiasNote').textContent = manualD1Bias
+    ? 'MANUAL ' + manualD1Bias.bias + ' active since ' + formatTime(manualD1Bias.since) +
+      '. Automatic D1 confirmation is bypassed. Only a matching H1 sweep formed after this selection can confirm.'
+    : 'AUTO: D1 bias is calculated from the D1 liquidity-sweep and confirmation rules.';
+}
+el('applyManualD1Bias').addEventListener('click',function(){
+  const selected = el('manualD1Bias').value;
+  if(selected === 'AUTO'){
+    manualD1Bias = null;
+    try{ localStorage.removeItem(MANUAL_D1_BIAS_KEY); }catch(error){}
+  }else if(selected === 'BULLISH' || selected === 'BEARISH'){
+    manualD1Bias = {bias:selected,since:Date.now()};
+    try{ localStorage.setItem(MANUAL_D1_BIAS_KEY,JSON.stringify(manualD1Bias)); }catch(error){}
+  }
+  syncManualBiasControls();
+  if(strategyBusy) strategyRefreshPending = true;
+  else refreshStrategy();
+});
 document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
   button.addEventListener('click',function(){
     selectedInterval = button.dataset.tf;
@@ -494,6 +558,7 @@ window.addEventListener('online',function(){
 document.addEventListener('visibilitychange',function(){
   if(!document.hidden) refreshStrategy();
 });
+syncManualBiasControls();
 renderTradeStats();
 renderChart();
 refreshStrategy();
