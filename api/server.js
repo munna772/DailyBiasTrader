@@ -183,6 +183,36 @@ function buildLatestBarTimes(dailyBars, hourlyBars, fiveMinuteBars) {
   };
 }
 
+// H1 timestamps are candle-open times. Evaluate freshness from the last
+// completed H1 close, allowing 90 minutes for ordinary session gaps/provider lag.
+function assessH1DataFreshness(rawBars, now = Date.now()) {
+  const H1_CANDLE_MS = 60 * 60 * 1000;
+  const MAX_H1_AGE_MS = 90 * 60 * 1000;
+  const completedBars = normalizeCandles(rawBars)
+    .filter(bar => bar.time + H1_CANDLE_MS <= Number(now));
+  if (!completedBars.length) {
+    return {
+      status: 'NO_DATA',
+      stale: true,
+      ageMinutes: null,
+      latestCandleAt: null,
+      latestCandleCloseAt: null
+    };
+  }
+  const latest = completedBars[completedBars.length - 1];
+  const closeAt = latest.time + H1_CANDLE_MS;
+  const ageMs = Math.max(0, Number(now) - closeAt);
+  const ageMinutes = Math.floor(ageMs / 60000);
+  const stale = ageMs > MAX_H1_AGE_MS;
+  return {
+    status: stale ? 'STALE' : 'FRESH',
+    stale,
+    ageMinutes,
+    latestCandleAt: new Date(latest.time).toISOString(),
+    latestCandleCloseAt: new Date(closeAt).toISOString()
+  };
+}
+
 function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
   const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
   const fallbackBars = buildFiveMinuteBarsFromOneMinute(minuteBars, now);
@@ -309,6 +339,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const market = await loadMarket(symbol);
     const freshness = assessMarketDataFreshness(market.m5);
+    const h1Freshness = assessH1DataFreshness(market.h1);
     const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince });
     const result = gateStrategyOnFreshness(rawStrategy, freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
@@ -322,6 +353,7 @@ const server = http.createServer(async (req, res) => {
       source: market.source,
       fetchedAt: new Date(market.fetchedAt).toISOString(),
       dataFreshness: freshness,
+      h1Freshness,
       barTimes: market.barTimes,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
       m5Source: market.m5Source,
@@ -349,4 +381,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness };
