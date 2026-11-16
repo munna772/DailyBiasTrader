@@ -12,12 +12,16 @@ function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
 }
 
-test('browser UI and Android APK UI stay identical', () => {
+test('browser UI and Android APK UI stay identical and expose manual D1 bias', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
   assert.ok(browserUi.includes('id="symbolLabel">XAUUSD'));
   assert.ok(browserUi.includes('GOLD ONLY'));
+  assert.ok(browserUi.includes('id="manualD1Bias"'));
+  assert.ok(browserUi.includes('MANUAL BULLISH'));
+  assert.ok(browserUi.includes('MANUAL BEARISH'));
+  assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
   assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
 });
 
@@ -252,6 +256,70 @@ test('Gold second-entry stop at or below $0.40 is allowed', () => {
   assert.ok(gold);
   assert.ok(Math.abs(gold.stopDistance - 0.4) < 1e-9);
   assert.equal(gold.stopValid, true);
+});
+
+test('manual bullish D1 bias bypasses D1 scan and starts H1 search at selection time', () => {
+  const h1 = [
+    c('2026-11-10T05:00:00', 102, 104, 100, 102),
+    c('2026-11-10T06:00:00', 102, 103, 101, 102),
+    c('2026-11-10T07:00:00', 102, 103, 99, 101)
+  ];
+  const result = analyzeStrategy({
+    d1: [],
+    h1,
+    m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: h1[2].time
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.biasMode, 'MANUAL');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Sweep.candleTime, h1[2].time);
+  assert.equal(result.entryStatus, 'WAITING_FOR_M5');
+});
+
+test('manual bearish D1 bias searches only matching H1 sweeps after selection', () => {
+  const h1 = [
+    c('2026-11-10T05:00:00', 102, 105, 100, 102),
+    c('2026-11-10T06:00:00', 102, 104, 101, 102),
+    c('2026-11-10T07:00:00', 104, 106, 103, 103.5)
+  ];
+  const result = analyzeStrategy({
+    d1: [],
+    h1,
+    m5: [],
+    manualBias: 'BEARISH',
+    manualBiasSince: h1[2].time
+  });
+  assert.equal(result.bias, 'BEARISH');
+  assert.equal(result.biasMode, 'MANUAL');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Sweep.candleTime, h1[2].time);
+});
+
+test('manual bias ignores an H1 sweep that occurred before the user selected it', () => {
+  const h1 = [
+    c('2026-11-10T05:00:00', 102, 104, 100, 102),
+    c('2026-11-10T06:00:00', 102, 103, 99, 101),
+    c('2026-11-10T07:00:00', 102, 103, 101, 102)
+  ];
+  const result = analyzeStrategy({
+    d1: [],
+    h1,
+    m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: h1[2].time
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.biasMode, 'MANUAL');
+  assert.equal(result.h1Status, 'WAITING_FOR_H1_SWEEP');
+  assert.equal(result.h1Sweep, undefined);
+});
+
+test('invalid or incomplete manual bias metadata falls back to automatic D1 analysis', () => {
+  const result = analyzeStrategy({d1: [],h1: [],m5: [],manualBias:'BULLISH'});
+  assert.equal(result.bias, 'WAITING');
+  assert.equal(result.biasMode, 'AUTO');
 });
 
 test('D1 confirmation must occur after the liquidity-sweep candle', () => {
