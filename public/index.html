@@ -47,6 +47,8 @@ select{font-size:13px}
 .pill.warn{background:#45341b;color:#ffd27b}
 .pill.good{background:#123c2c;color:#7cf4bb}
 .pill.bad{background:#49232d;color:#ff9cac}
+.bar-countdown{margin-top:8px}
+.bar-countdown-value{display:block;font:800 27px/1.25 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1px;font-variant-numeric:tabular-nums;margin-top:5px}
 .hidden{display:none!important}
 footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 @media(min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}#tv_chart{height:520px}}
@@ -69,6 +71,11 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   </div>
   <div id="chartMessage" role="status" aria-live="polite">Loading TradingView chart…</div>
   <div id="tv_chart" aria-label="TradingView market chart"></div>
+  <div class="metric bar-countdown" id="barCountdown" aria-label="Selected chart timeframe bar countdown">
+    <div class="row"><small id="barCountdownLabel">D1 BAR COUNTDOWN</small><span class="pill warn" id="barCountdownState">WAITING FOR DATA</span></div>
+    <b class="bar-countdown-value" id="barCountdownValue" aria-live="off">—</b>
+    <div class="sub" id="barCountdownNote">Waiting for fresh Gold candle timestamps from SiftingIO.</div>
+  </div>
   <div class="sub" style="margin-top:8px">Chart source: TradingView. Candle availability, exchange coverage and delays depend on the selected TradingView symbol/feed.</div>
 </section>
 
@@ -144,6 +151,13 @@ let chartTimer = null;
 let chartGeneration = 0;
 let strategyBusy = false;
 let chartWasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+const BAR_INTERVALS = Object.freeze({
+  D: { label:'D1', key:'D1', durationMs:24*60*60*1000, maxAgeMs:4.2*24*60*60*1000 },
+  '60': { label:'H1', key:'H1', durationMs:60*60*1000, maxAgeMs:4.2*60*60*1000 },
+  '5': { label:'M5', key:'M5', durationMs:5*60*1000, maxAgeMs:4.2*5*60*1000 }
+});
+let latestBarTimes = null;
+let latestDataFreshness = null;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
 const MANUAL_D1_BIAS_KEY = 'dailybiastrader_manual_d1_bias_v1';
 let strategyRefreshPending = false;
@@ -265,6 +279,49 @@ function formatTime(value){
   if(!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('en-GB',{timeZone:'Asia/Dhaka'});
+}
+function formatBarCountdown(milliseconds, interval){
+  let totalSeconds = Math.max(0,Math.ceil(milliseconds/1000));
+  const days = Math.floor(totalSeconds/86400);
+  totalSeconds %= 86400;
+  const hours = Math.floor(totalSeconds/3600);
+  totalSeconds %= 3600;
+  const minutes = Math.floor(totalSeconds/60);
+  const seconds = totalSeconds%60;
+  const pad = value => String(value).padStart(2,'0');
+  if(interval.key === 'D1' && days > 0) return days + 'd ' + pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
+  if(interval.key === 'M5') return pad(minutes) + ':' + pad(seconds);
+  return pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
+}
+function renderBarCountdown(){
+  const interval = BAR_INTERVALS[selectedInterval];
+  if(!interval) return;
+  el('barCountdownLabel').textContent = interval.label + ' BAR COUNTDOWN';
+  const pause = (state,note) => {
+    el('barCountdownValue').textContent = '—';
+    el('barCountdownState').textContent = state;
+    el('barCountdownState').className = 'pill warn';
+    el('barCountdownNote').textContent = note;
+  };
+  if(!latestDataFreshness || latestDataFreshness.stale === true || latestDataFreshness.status !== 'FRESH'){
+    pause('PAUSED','No fresh M5 feed confirmation. The countdown stays paused rather than inventing a live bar while data is stale or missing.');
+    return;
+  }
+  const latestRaw = latestBarTimes && latestBarTimes[interval.key];
+  const latestOpen = latestRaw ? Date.parse(latestRaw) : NaN;
+  const now = Date.now();
+  if(!Number.isFinite(latestOpen) || latestOpen > now + 60000 || now-latestOpen > interval.maxAgeMs){
+    pause('WAITING FOR BAR','The latest ' + interval.label + ' candle timestamp is missing or too old. No close time is guessed.');
+    return;
+  }
+  const age = Math.max(0,now-latestOpen);
+  const elapsedBars = Math.floor(age/interval.durationMs);
+  const nextClose = latestOpen + (elapsedBars+1)*interval.durationMs;
+  const remaining = Math.max(0,nextClose-now);
+  el('barCountdownValue').textContent = formatBarCountdown(remaining,interval);
+  el('barCountdownState').textContent = 'COUNTING';
+  el('barCountdownState').className = 'pill good';
+  el('barCountdownNote').textContent = 'Based on latest SiftingIO ' + interval.label + ' candle timestamp (' + formatTime(latestRaw) + '). TradingView chart feed is independent.';
 }
 function setMetric(id, text, state){
   const node = el(id);
@@ -426,7 +483,10 @@ async function refreshStrategy(){
       throw new Error(error);
     }
     const s = payload.strategy || {};
-    const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: false, ageMinutes: null, latestCandleAt: null };
+    const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null };
+    latestBarTimes = payload.barTimes || null;
+    latestDataFreshness = freshness;
+    renderBarCountdown();
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     const d1Sweep = s.d1Sweep || null;
@@ -487,6 +547,8 @@ async function refreshStrategy(){
     renderFib(s.fib);
     renderEntries(s.entries);
   }catch(error){
+    latestDataFreshness = {status:'UNKNOWN',stale:true};
+    renderBarCountdown();
     const message = error && (error.name === 'TimeoutError' || error.name === 'AbortError')
       ? 'Strategy service timed out. A free Render service may be waking up, or the market-data provider may be slow; retry shortly.'
       : (error && error.message) || 'Could not reach the strategy service.';
@@ -540,6 +602,7 @@ document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
   button.addEventListener('click',function(){
     selectedInterval = button.dataset.tf;
     document.querySelectorAll('#timeframes button[data-tf]').forEach(item => item.classList.toggle('active',item === button));
+    renderBarCountdown();
     renderChart();
   });
 });
@@ -547,6 +610,8 @@ el('reloadChart').addEventListener('click',renderChart);
 el('refreshStrategy').addEventListener('click',refreshStrategy);
 window.addEventListener('offline',function(){
   chartWasOffline = true;
+  latestDataFreshness = {status:'OFFLINE',stale:true};
+  renderBarCountdown();
   if(chartTimer) clearTimeout(chartTimer);
   showChartFailure('Your device reports that it is offline. The strategy API may also be unreachable until the connection returns.');
 });
@@ -556,13 +621,14 @@ window.addEventListener('online',function(){
   renderChart();
 });
 document.addEventListener('visibilitychange',function(){
-  if(!document.hidden) refreshStrategy();
+  if(!document.hidden){ renderBarCountdown(); refreshStrategy(); }
 });
 syncManualBiasControls();
 renderTradeStats();
 renderChart();
 refreshStrategy();
 setInterval(function(){ if(!document.hidden) refreshStrategy(); },60000);
+setInterval(function(){ if(!document.hidden) renderBarCountdown(); },1000);
 })();
 </script>
 </body>
