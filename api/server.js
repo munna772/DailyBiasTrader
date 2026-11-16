@@ -277,10 +277,24 @@ const server = http.createServer(async (req, res) => {
   if (!symbol) {
     return send(res, 400, { error: 'This app supports XAUUSD (Gold) only.' });
   }
+  const manualBiasParam = String(url.searchParams.get('manualBias') || '').toUpperCase();
+  let manualBias = null;
+  let manualBiasSince = null;
+  if (manualBiasParam) {
+    if (manualBiasParam !== 'BULLISH' && manualBiasParam !== 'BEARISH') {
+      return send(res, 400, { error: 'manualBias must be BULLISH or BEARISH.' });
+    }
+    const requestedSince = Number(url.searchParams.get('manualBiasSince'));
+    if (!Number.isFinite(requestedSince) || requestedSince <= 0 || requestedSince > Date.now() + 5 * 60 * 1000) {
+      return send(res, 400, { error: 'A valid manualBiasSince timestamp is required. Reapply the manual D1 bias.' });
+    }
+    manualBias = manualBiasParam;
+    manualBiasSince = requestedSince;
+  }
   try {
     const market = await loadMarket(symbol);
     const freshness = assessMarketDataFreshness(market.m5);
-    const rawStrategy = analyzeStrategy({ ...market, symbol });
+    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince });
     const result = gateStrategyOnFreshness(rawStrategy, freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
