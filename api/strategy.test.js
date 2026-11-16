@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl } = require('./server');
+const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -466,4 +466,56 @@ test('SiftingIO history requests fetch a wide enough window and newest bars firs
 test('SiftingIO history URL rejects unsupported intervals and invalid limits', () => {
   assert.throws(() => buildSeriesUrl('XAUUSD', '15m', 100, Date.now()), /Unsupported SiftingIO interval/);
   assert.throws(() => buildSeriesUrl('XAUUSD', '5m', 2500, Date.now()), /limit must be an integer/);
+});
+
+test('one-minute fallback creates an M5 candle only from five complete real minutes', () => {
+  const start = Date.parse('2026-11-16T00:00:00Z');
+  const minutes = [
+    { time: start, open: 100, high: 102, low: 99, close: 101, volume: 2 },
+    { time: start + 60000, open: 101, high: 104, low: 100, close: 103, volume: 3 },
+    { time: start + 120000, open: 103, high: 105, low: 102, close: 104, volume: 4 },
+    { time: start + 180000, open: 104, high: 104, low: 101, close: 102, volume: 1 },
+    { time: start + 240000, open: 102, high: 103, low: 98, close: 99, volume: 5 }
+  ];
+  const result = buildFiveMinuteBarsFromOneMinute(minutes, start + 300000);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].time, start);
+  assert.equal(result[0].open, 100);
+  assert.equal(result[0].high, 105);
+  assert.equal(result[0].low, 98);
+  assert.equal(result[0].close, 99);
+  assert.equal(result[0].volume, 15);
+});
+
+test('one-minute fallback refuses missing minutes and an unfinished M5 bucket', () => {
+  const start = Date.parse('2026-11-16T00:00:00Z');
+  const fiveMinutes = Array.from({ length: 5 }, (_, index) => ({
+    time: start + index * 60000,
+    open: 100 + index,
+    high: 102 + index,
+    low: 99 + index,
+    close: 101 + index,
+    volume: 1
+  }));
+  assert.equal(buildFiveMinuteBarsFromOneMinute(fiveMinutes.filter((_, index) => index !== 2), start + 300000).length, 0);
+  assert.equal(buildFiveMinuteBarsFromOneMinute(fiveMinutes, start + 299999).length, 0);
+  assert.equal(buildFiveMinuteBarsFromOneMinute(fiveMinutes, start + 300000).length, 1);
+});
+
+test('one-minute fallback adds newer M5 bars without overwriting provider M5 candles', () => {
+  const start = Date.parse('2026-11-16T00:00:00Z');
+  const providerBar = { time: start, open: 90, high: 95, low: 89, close: 94, volume: 8 };
+  const minuteBars = Array.from({ length: 10 }, (_, index) => ({
+    time: start + index * 60000,
+    open: 100 + index,
+    high: 102 + index,
+    low: 99 + index,
+    close: 101 + index,
+    volume: 1
+  }));
+  const merged = mergeFiveMinuteBars([providerBar], minuteBars, start + 600000);
+  assert.equal(merged.added, 1);
+  assert.equal(merged.bars.length, 2);
+  assert.equal(merged.bars[0].close, 94);
+  assert.equal(merged.bars[1].time, start + 300000);
 });
