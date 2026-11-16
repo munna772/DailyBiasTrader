@@ -355,7 +355,7 @@ function updateTradeLedger(m5Closed, entries){
 }
 function renderFib(fib){
   const target = el('fibLevels');
-  if(!fib){ target.innerHTML = '<div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div>'; return; }
+  if(!fib){ target.innerHTML = '<div class="notice">Waiting for an active D1 bias and a matching H1 sweep.</div>'; return; }
   target.innerHTML = '';
   [['1','100% — H1 candle extreme'],['0.618','61.8% — second-entry trigger / requested SL'],['0.5','50% — first-entry trigger'],['0','0% — take-profit target / sweep origin']].forEach(item => {
     const row = document.createElement('div');
