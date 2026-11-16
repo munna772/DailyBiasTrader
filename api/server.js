@@ -78,6 +78,7 @@ function parseSiftingBars(response) {
 // a wide window plus a small page limit can return old candles instead of
 // the latest candles required by the live strategy.
 const HISTORY_INTERVALS = Object.freeze({
+  '1m': { milliseconds: 60 * 1000, calendarMultiplier: 12 },
   '1d': { milliseconds: 24 * 60 * 60 * 1000, calendarMultiplier: 2 },
   '1h': { milliseconds: 60 * 60 * 1000, calendarMultiplier: 4 },
   '5m': { milliseconds: 5 * 60 * 1000, calendarMultiplier: 20 }
@@ -129,6 +130,57 @@ function completedOnly(bars, durationMs, now) {
   return bars.filter(bar => bar.time + durationMs <= now);
 }
 
+// Rebuild only fully completed 5-minute buckets from five real, consecutive
+// one-minute SiftingIO candles. Missing minutes are never guessed or filled.
+function buildFiveMinuteBarsFromOneMinute(rawBars, now = Date.now()) {
+  const minuteBars = completedOnly(normalizeCandles(rawBars), 60 * 1000, Number(now));
+  const groups = new Map();
+  for (const bar of minuteBars) {
+    const bucketTime = Math.floor(bar.time / (5 * 60 * 1000)) * (5 * 60 * 1000);
+    const expectedMinuteTime = bucketTime + Math.floor((bar.time - bucketTime) / 60000) * 60000;
+    if (bar.time !== expectedMinuteTime) continue;
+    if (!groups.has(bucketTime)) groups.set(bucketTime, new Map());
+    groups.get(bucketTime).set(bar.time, bar);
+  }
+
+  const result = [];
+  for (const [bucketTime, minutes] of groups) {
+    if (bucketTime + 5 * 60 * 1000 > Number(now)) continue;
+    const ordered = [];
+    let complete = true;
+    for (let index = 0; index < 5; index += 1) {
+      const minute = minutes.get(bucketTime + index * 60 * 1000);
+      if (!minute) {
+        complete = false;
+        break;
+      }
+      ordered.push(minute);
+    }
+    if (!complete) continue;
+    result.push({
+      time: bucketTime,
+      open: ordered[0].open,
+      high: Math.max(...ordered.map(bar => bar.high)),
+      low: Math.min(...ordered.map(bar => bar.low)),
+      close: ordered[4].close,
+      volume: ordered.reduce((sum, bar) => sum + (Number(bar.volume) || 0), 0)
+    });
+  }
+  return normalizeCandles(result);
+}
+
+function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
+  const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
+  const fallbackBars = buildFiveMinuteBarsFromOneMinute(minuteBars, now);
+  let added = 0;
+  for (const bar of fallbackBars) {
+    if (merged.has(bar.time)) continue;
+    merged.set(bar.time, bar);
+    added += 1;
+  }
+  return { bars: normalizeCandles([...merged.values()]), added, fallbackBars };
+}
+
 async function loadMarket(symbolKey) {
   if (!API_KEY) {
     const error = new Error('SiftingIO API key is not configured. Set DAILY_BIAS_TRADER in Render.');
@@ -144,10 +196,34 @@ async function loadMarket(symbolKey) {
     fetchSeries(providerSymbol, '1h', 1000),
     fetchSeries(providerSymbol, '5m', 500)
   ]);
+
+  let m5Fallback = {
+    attempted: false,
+    addedBars: 0,
+    latestM1At: null,
+    error: null
+  };
+  let usableFiveMinuteRaw = fiveMinuteRaw;
+  if (!fiveMinuteRaw.length || assessMarketDataFreshness(fiveMinuteRaw, Date.now()).stale) {
+    m5Fallback.attempted = true;
+    try {
+      // Some provider snapshots can lag on the aggregated 5m interval while
+      // the underlying 1m series is current. Use actual 1m OHLC as a fallback.
+      const oneMinuteRaw = await fetchSeries(providerSymbol, '1m', 1000);
+      const latestMinute = oneMinuteRaw[oneMinuteRaw.length - 1];
+      m5Fallback.latestM1At = latestMinute ? new Date(latestMinute.time).toISOString() : null;
+      const merged = mergeFiveMinuteBars(fiveMinuteRaw, oneMinuteRaw, Date.now());
+      usableFiveMinuteRaw = merged.bars;
+      m5Fallback.addedBars = merged.added;
+    } catch (error) {
+      m5Fallback.error = error && error.message ? error.message : 'One-minute fallback request failed.';
+    }
+  }
+
   const incomplete = [];
   if (dailyRaw.length < 8) incomplete.push('D1=' + dailyRaw.length + ' (need at least 8)');
   if (hourlyRaw.length < 2) incomplete.push('H1=' + hourlyRaw.length + ' (need at least 2)');
-  if (fiveMinuteRaw.length < 10) incomplete.push('M5=' + fiveMinuteRaw.length + ' (need at least 10)');
+  if (usableFiveMinuteRaw.length < 10) incomplete.push('M5=' + usableFiveMinuteRaw.length + ' (need at least 10)');
   if (incomplete.length) {
     const error = new Error('SiftingIO returned incomplete OHLC history: ' + incomplete.join(', ') + '. Check instrument coverage and interval access.');
     error.statusCode = 502;
@@ -158,8 +234,10 @@ async function loadMarket(symbolKey) {
   const value = {
     d1: completedOnly(dailyRaw, 24 * 60 * 60 * 1000, now),
     h1: completedOnly(hourlyRaw, 60 * 60 * 1000, now),
-    m5: fiveMinuteRaw,
-    m5Closed: completedOnly(fiveMinuteRaw, 5 * 60 * 1000, now),
+    m5: usableFiveMinuteRaw,
+    m5Closed: completedOnly(usableFiveMinuteRaw, 5 * 60 * 1000, now),
+    m5Source: m5Fallback.addedBars ? 'SiftingIO 5m + complete SiftingIO 1m aggregates' : 'SiftingIO 5m',
+    m5Fallback,
     source: PROVIDER,
     providerSymbol,
     fetchedAt: now,
@@ -216,6 +294,8 @@ const server = http.createServer(async (req, res) => {
       fetchedAt: new Date(market.fetchedAt).toISOString(),
       dataFreshness: freshness,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
+      m5Source: market.m5Source,
+      m5Fallback: market.m5Fallback,
       // Closed M5 history lets the client resolve previously recorded strategy setups.
       // The UI only uses candles after each trade's entry candle.
       m5Closed: market.m5Closed,
@@ -239,4 +319,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars };
