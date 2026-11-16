@@ -654,6 +654,11 @@ el('refreshStrategy').addEventListener('click',refreshStrategy);
 el('demoConfirmations').addEventListener('click',function(){
   demoConfirmationsEnabled = !demoConfirmationsEnabled;
   renderDemoConfirmations();
+  if(!demoConfirmationsEnabled){
+    // Restore the latest real feed state immediately after leaving demo mode.
+    if(strategyBusy) strategyRefreshPending = true;
+    else refreshStrategy();
+  }
 });
 window.addEventListener('offline',function(){
   chartWasOffline = true;
