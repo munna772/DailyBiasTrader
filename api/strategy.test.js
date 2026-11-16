@@ -31,6 +31,8 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('renderDemoConfirmations'));
   assert.ok(browserUi.includes('SIMULATED: a matching bullish H1 sweep'));
   assert.ok(browserUi.includes('SIMULATED: an M5 confirmation'));
+  assert.ok(browserUi.includes('Restore the latest real feed state immediately after leaving demo mode.'));
+  assert.ok(browserUi.includes('if(strategyBusy) strategyRefreshPending = true;'));
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
