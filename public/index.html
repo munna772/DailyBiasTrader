@@ -81,6 +81,11 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 
 <section class="panel">
   <div class="row"><div class="section-title">STRATEGY STATUS</div><button id="refreshStrategy">Refresh signals</button></div>
+  <div class="row" style="margin:6px 0 10px;justify-content:flex-start;flex-wrap:wrap">
+    <button id="demoConfirmations" type="button" aria-pressed="false">Run fake H1 + M5 confirmations</button>
+    <span class="pill warn" id="demoStatus">DEMO OFF</span>
+  </div>
+  <div class="notice warn" id="demoNote" style="display:none;margin-bottom:10px">DEMO TEST ONLY — H1 and M5 confirmations below are simulated. No fake candles or prices are created, no trade is added to statistics, and no real strategy signal is generated. Click the button again to return to live status.</div>
   <div class="row" style="margin:2px 0 8px;justify-content:flex-start;flex-wrap:wrap">
     <label for="manualD1Bias" class="sub" style="margin-right:3px">D1 BIAS MODE</label>
     <select id="manualD1Bias" aria-label="D1 bias mode">
@@ -161,6 +166,7 @@ let latestDataFreshness = null;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
 const MANUAL_D1_BIAS_KEY = 'dailybiastrader_manual_d1_bias_v1';
 let strategyRefreshPending = false;
+let demoConfirmationsEnabled = false;
 function loadManualD1Bias(){
   try{
     const raw = localStorage.getItem(MANUAL_D1_BIAS_KEY);
@@ -461,6 +467,22 @@ function renderEntries(entries){
     target.appendChild(row);
   });
 }
+function renderDemoConfirmations(){
+  const button = el('demoConfirmations');
+  const status = el('demoStatus');
+  const note = el('demoNote');
+  button.setAttribute('aria-pressed', demoConfirmationsEnabled ? 'true' : 'false');
+  button.textContent = demoConfirmationsEnabled ? 'Clear fake confirmations' : 'Run fake H1 + M5 confirmations';
+  status.textContent = demoConfirmationsEnabled ? 'DEMO ACTIVE' : 'DEMO OFF';
+  status.className = demoConfirmationsEnabled ? 'pill warn' : 'pill';
+  note.style.display = demoConfirmationsEnabled ? 'block' : 'none';
+  if(!demoConfirmationsEnabled) return;
+  setMetric('h1','DEMO CONFIRMED','wait');
+  el('h1Detail').textContent = 'SIMULATED: a matching bullish H1 sweep is being treated as confirmed for this display test. No H1 candle was read or created.';
+  setMetric('entry','DEMO M5 CONFIRMED','wait');
+  el('entryDetail').textContent = 'SIMULATED: an M5 confirmation is being displayed after the fake H1 confirmation. This is not a real entry and has no entry, stop-loss or take-profit price.';
+  el('entries').textContent = 'DEMO ONLY — simulated H1 confirmation → simulated M5 confirmation. No trade setup or prices were generated.';
+}
 async function refreshStrategy(){
   if(strategyBusy) return;
   strategyBusy = true;
@@ -565,6 +587,7 @@ async function refreshStrategy(){
     el('riskWarning').classList.toggle('hidden', !s.riskWarning);
     renderFib(s.fib);
     renderEntries(s.entries);
+    renderDemoConfirmations();
   }catch(error){
     latestDataFreshness = {status:'UNKNOWN',stale:true};
     renderBarCountdown();
@@ -587,6 +610,7 @@ async function refreshStrategy(){
     setMetric('entry','DISABLED','wait');
     renderFib(null);
     el('entries').textContent = 'No real market data received. Signals are disabled.';
+    renderDemoConfirmations();
   }finally{
     clearTimeout(requestTimeout);
     strategyBusy = false;
@@ -627,6 +651,10 @@ document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
 });
 el('reloadChart').addEventListener('click',renderChart);
 el('refreshStrategy').addEventListener('click',refreshStrategy);
+el('demoConfirmations').addEventListener('click',function(){
+  demoConfirmationsEnabled = !demoConfirmationsEnabled;
+  renderDemoConfirmations();
+});
 window.addEventListener('offline',function(){
   chartWasOffline = true;
   latestDataFreshness = {status:'OFFLINE',stale:true};
