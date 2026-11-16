@@ -518,4 +518,5 @@ test('one-minute fallback adds newer M5 bars without overwriting provider M5 can
   assert.equal(merged.bars.length, 2);
   assert.equal(merged.bars[0].close, 94);
   assert.equal(merged.bars[1].time, start + 300000);
+  assert.equal(assessMarketDataFreshness(merged.bars, start + 600000).stale, false);
 });
