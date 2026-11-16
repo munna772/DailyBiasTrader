@@ -400,7 +400,19 @@ async function refreshStrategy(){
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     setMetric('bias', s.bias || 'WAITING', s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
-    el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
+    const d1Sweep = s.d1Sweep || null;
+    if (s.bias === 'WAITING' && d1Sweep) {
+      const bullishSweep = d1Sweep.side === 'bullish';
+      const confirmationRule = bullishSweep
+        ? 'a later completed D1 candle must close above the previous D1 high, or form a bullish engulfing, rejection, displacement, or the specified 3-candle inside-bar pattern'
+        : 'a later completed D1 candle must close below the previous D1 low, or form a bearish engulfing, rejection, displacement, or the specified 3-candle inside-bar pattern';
+      el('biasDetail').textContent = (bullishSweep ? 'Bullish' : 'Bearish') + ' ' +
+        (d1Sweep.levelName || 'liquidity') + ' sweep detected at ' + formatTime(d1Sweep.time) +
+        '. Waiting for confirmation: ' + confirmationRule +
+        '. The sweep candle itself cannot confirm its own sweep.';
+    } else {
+      el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
+    }
     setMetric('h1', s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' '), s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
     el('h1Detail').textContent = s.h1Sweep ? 'Sweep candle: ' + formatTime(s.h1Sweep.time) : 'Requires matching H1 sweep after D1';
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
