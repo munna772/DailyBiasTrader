@@ -25,7 +25,7 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('payload.barTimes'));
   assert.ok(browserUi.includes('latestDataFreshness.stale'));
-  assert.ok(browserUi.includes('SiftingIO candle timestamp'));
+  assert.ok(browserUi.includes('Based on latest SiftingIO '));
   assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
 });
 
