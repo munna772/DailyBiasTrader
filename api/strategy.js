@@ -395,7 +395,18 @@ function analyzeStrategy(input) {
   const d1 = normalizeCandles(input.d1), h1 = normalizeCandles(input.h1), m5 = normalizeCandles(input.m5);
   const daily = findDailyBias(d1);
   if (daily.bias === 'WAITING') {
-    return { bias: daily.bias, biasReason: daily.reason, h1Status: 'WAITING_FOR_D1', entryStatus: 'DISABLED', fib: null, entries: [], riskWarning: null, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
+    return {
+      bias: daily.bias,
+      biasReason: daily.reason,
+      d1Sweep: daily.sweep || null,
+      d1Confirmation: daily.confirmation || null,
+      h1Status: 'WAITING_FOR_D1',
+      entryStatus: 'DISABLED',
+      fib: null,
+      entries: [],
+      riskWarning: null,
+      data: { d1: d1.length, h1: h1.length, m5: m5.length }
+    };
   }
   const side = daily.bias === 'BULLISH' ? 'bullish' : 'bearish';
   const h1Sweep = findHourlySweep(h1, side, daily.confirmation.time);
