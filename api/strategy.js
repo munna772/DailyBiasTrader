@@ -1,6 +1,7 @@
 'use strict';
 
 const H1_LOOKBACK_BARS = Number.POSITIVE_INFINITY;
+const H1_CANDLE_MS = 60 * 60 * 1000;
 const DAILY_SWEEP_SCAN_BARS = 260;
 const EQ_LOOKBACK_BARS = 60;
 
@@ -241,7 +242,10 @@ function findDailyBias(rawBars) {
 function findHourlySweep(rawBars, side, afterTime, lookback = H1_LOOKBACK_BARS) {
   const bars = normalizeCandles(rawBars);
   if (bars.length < 2) return null;
-  const foundAt = bars.findIndex(c => c.time >= afterTime);
+  // H1 provider timestamps mark candle OPEN. A manual D1 bias can be selected
+  // during an H1 candle; that candle is eligible once it CLOSES after the bias
+  // time. Candles whose close time is at/before the bias time remain excluded.
+  const foundAt = bars.findIndex(c => c.time + H1_CANDLE_MS > afterTime);
   if (foundAt < 0) return null;
   const startAt = Math.max(1, foundAt);
   if (startAt >= bars.length) return null;
@@ -251,12 +255,12 @@ function findHourlySweep(rawBars, side, afterTime, lookback = H1_LOOKBACK_BARS) 
     if (side === 'bullish') {
       const swept = prior.map(c => c.low).filter(level => current.low < level && current.close > level);
       if (swept.length) {
-        return { side, level: Math.max(...swept), time: current.time + 60 * 60 * 1000, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
+        return { side, level: Math.max(...swept), time: current.time + H1_CANDLE_MS, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
       }
     } else {
       const swept = prior.map(c => c.high).filter(level => current.high > level && current.close < level);
       if (swept.length) {
-        return { side, level: Math.min(...swept), time: current.time + 60 * 60 * 1000, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
+        return { side, level: Math.min(...swept), time: current.time + H1_CANDLE_MS, candleTime: current.time, candle: current, lookbackBars: Math.min(lookback, i) };
       }
     }
   }
@@ -434,7 +438,22 @@ function analyzeStrategy(input) {
   const side = daily.bias === 'BULLISH' ? 'bullish' : 'bearish';
   const h1Sweep = findHourlySweep(h1, side, daily.confirmation.time);
   if (!h1Sweep) {
-    return { bias: daily.bias, biasReason: daily.reason, ...biasMetadata, h1Status: 'WAITING_FOR_H1_SWEEP', entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null, daily, data: { d1: d1.length, h1: h1.length, m5: m5.length } };
+    const h1SearchAfter = daily.confirmation.time;
+    const h1BarsChecked = h1.filter(candle => candle.time + H1_CANDLE_MS > h1SearchAfter).length;
+    return {
+      bias: daily.bias,
+      biasReason: daily.reason,
+      ...biasMetadata,
+      h1Status: 'WAITING_FOR_H1_SWEEP',
+      h1SearchAfter,
+      h1BarsChecked,
+      entryStatus: 'WAITING',
+      fib: null,
+      entries: [],
+      riskWarning: null,
+      daily,
+      data: { d1: d1.length, h1: h1.length, m5: m5.length }
+    };
   }
   const fib = calculateFib(h1Sweep.candle, side);
   const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
