@@ -22,6 +22,8 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL BULLISH'));
   assert.ok(browserUi.includes('MANUAL BEARISH'));
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
+  assert.ok(browserUi.includes('whose candle closes after '));
+  assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('payload.barTimes'));
   assert.ok(browserUi.includes('latestDataFreshness.stale'));
@@ -299,6 +301,48 @@ test('manual bearish D1 bias searches only matching H1 sweeps after selection', 
   assert.equal(result.biasMode, 'MANUAL');
   assert.equal(result.h1Status, 'CONFIRMED');
   assert.equal(result.h1Sweep.candle.time, h1[2].time);
+});
+
+test('manual bias selected mid-hour accepts a matching sweep when that H1 candle later closes', () => {
+  const h1 = [
+    c('2026-11-16T10:00:00', 102, 104, 100, 102),
+    c('2026-11-16T11:00:00', 102, 104, 99, 101),
+    c('2026-11-16T12:00:00', 101, 103, 100, 102)
+  ];
+  const selectedAt = Date.parse('2026-11-16T11:03:14Z');
+  const result = analyzeStrategy({
+    d1: [],
+    h1,
+    m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: selectedAt
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.biasMode, 'MANUAL');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Sweep.candle.time, h1[1].time);
+  assert.equal(result.h1Sweep.time, h1[1].time + 60 * 60 * 1000);
+});
+
+test('manual bias excludes an H1 sweep candle that closed before selection', () => {
+  const h1 = [
+    c('2026-11-16T10:00:00', 102, 104, 100, 102),
+    c('2026-11-16T11:00:00', 102, 104, 99, 101),
+    c('2026-11-16T12:00:00', 101, 103, 100, 102)
+  ];
+  const selectedAfterClose = Date.parse('2026-11-16T12:00:01Z');
+  const result = analyzeStrategy({
+    d1: [],
+    h1,
+    m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: selectedAfterClose
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.biasMode, 'MANUAL');
+  assert.equal(result.h1Status, 'WAITING_FOR_H1_SWEEP');
+  assert.equal(result.h1BarsChecked, 1);
+  assert.equal(result.h1SearchAfter, selectedAfterClose);
 });
 
 test('manual bias ignores an H1 sweep that occurred before the user selected it', () => {
