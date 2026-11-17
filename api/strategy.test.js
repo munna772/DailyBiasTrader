@@ -217,7 +217,7 @@ test('detects a touch when the candle range includes the entry level', () => {
   assert.equal(candleTouches({ high: 109.9, low: 108 }, 110), false);
 });
 
-test('H1 confirmation can sweep a low from more than the immediately previous candle', () => {
+test('H1 confirmation uses the immediately previous completed candle as its sweep level', () => {
   const bars = [
     c('2026-11-10T01:00:00', 110, 112, 100, 108),
     c('2026-11-10T02:00:00', 108, 110, 104, 106),
@@ -226,7 +226,9 @@ test('H1 confirmation can sweep a low from more than the immediately previous ca
   ];
   const result = findHourlySweep(bars, 'bullish', bars[0].time);
   assert.ok(result);
-  assert.equal(result.level, 104);
+  assert.equal(result.level, bars[2].low);
+  assert.equal(result.referenceCandleTime, bars[2].time);
+  assert.equal(result.lookbackBars, 1);
   assert.equal(result.time, bars[3].time + 60 * 60 * 1000);
 });
 
