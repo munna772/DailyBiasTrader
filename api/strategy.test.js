@@ -466,7 +466,8 @@ test('manual H1 confirmation requires a completed reference candle', () => {
     manualBias: 'BULLISH',
     manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
     manualH1Bias: 'BULLISH',
-    manualH1BiasSince: selectedAt
+    manualH1BiasSince: selectedAt,
+    now: selectedAt
   });
   assert.equal(result.h1Status, 'WAITING_FOR_MANUAL_H1_CANDLE');
   assert.equal(result.fib, null);
