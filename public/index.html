@@ -114,8 +114,8 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 </section>
 
 <section class="panel">
-  <div class="section-title">H1 FIBONACCI — SWEEP CANDLE RANGE</div>
-  <div id="fibLevels"><div class="notice">Waiting for a confirmed D1 bias and H1 sweep.</div></div>
+  <div class="section-title">H1 FIBONACCI — REFERENCE CANDLE RANGE</div>
+  <div id="fibLevels"><div class="notice">Waiting for a confirmed D1 bias and H1 confirmation.</div></div>
 </section>
 
 <section class="panel">
@@ -438,7 +438,7 @@ function renderFib(fib){
   const target = el('fibLevels');
   if(!fib){ target.innerHTML = '<div class="notice">Waiting for an active D1 bias and a matching H1 sweep.</div>'; return; }
   target.innerHTML = '';
-  [['1','100% — H1 candle extreme'],['0.618','61.8% — second-entry trigger / requested SL'],['0.5','50% — first-entry trigger'],['0','0% — take-profit target / sweep origin']].forEach(item => {
+  [['1','100% — H1 candle extreme'],['0.618','61.8% — second-entry trigger / requested SL'],['0.5','50% — first-entry trigger'],['0','0% — take-profit target / H1 reference origin']].forEach(item => {
     const row = document.createElement('div');
     row.className = 'levels';
     const name = document.createElement('span');
@@ -454,7 +454,7 @@ function renderEntries(entries){
   const target = el('entries');
   clearElement(target);
   if(!entries || !entries.length){
-    target.textContent = 'No M5 entry condition detected after the H1 sweep.';
+    target.textContent = 'No M5 entry condition detected after H1 confirmation.';
     return;
   }
   entries.forEach(entry => {
@@ -568,7 +568,7 @@ async function refreshStrategy(){
         const sweepHistory = s.h1Sweep && !s.h1Sweep.manual ? 'A matching H1 sweep exists in the returned history at ' + formatTime(s.h1Sweep.time) + '. ' : 'No matching sweep can be verified from fresh H1 data. ';
         el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
           (isManualBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
-          sweepHistory + 'Wait for fresh H1 candles. Missing data is not treated as proof that no sweep occurred.';
+          sweepHistory + 'Wait for fresh H1 candles. M5 entries stay paused until H1 data is fresh. Missing data is not treated as proof that no sweep occurred.';
       }
     } else if(isManualH1 && s.h1Status === 'CONFIRMED'){
       el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 confirmation applied at ' + formatTime(manualH1Since) +
@@ -587,11 +587,16 @@ async function refreshStrategy(){
           : 'Requires matching H1 sweep after D1 confirmation';
     }
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
-    setMetric('entry', dataStale ? 'PAUSED — STALE DATA' : entryState, dataStale ? 'bad' : entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
+    const h1EntryPaused = h1DataStale && s.h1Status === 'CONFIRMED';
+    const entriesPaused = dataStale || h1EntryPaused;
+    setMetric('entry', entriesPaused ? 'PAUSED — STALE DATA' : entryState, entriesPaused ? 'bad' : entryState.includes('BLOCKED') ? 'bad' : entryState.includes('DETECTED') ? 'good' : 'wait');
     const latestM5Close = freshness.latestCandleAt ? new Date(Date.parse(freshness.latestCandleAt) + 5 * 60 * 1000).toISOString() : null;
+    const latestH1CloseForEntry = h1Freshness.latestCandleCloseAt ? formatTime(h1Freshness.latestCandleCloseAt) : 'unavailable';
     el('entryDetail').textContent = dataStale
       ? 'Paused: latest completed M5 candle closed at ' + (latestM5Close ? formatTime(latestM5Close) : 'unavailable') + ' (' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min ago') + '). Entry conditions are not evaluated on stale M5 data.'
-      : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
+      : h1EntryPaused
+        ? 'Paused: latest completed H1 candle closed at ' + latestH1CloseForEntry + ' (' + (h1Freshness.ageMinutes === null ? 'age unknown' : h1Freshness.ageMinutes + ' min ago') + '). Entry conditions are not evaluated until fresh H1 data is available.'
+        : (s.entries && s.entries.length ? s.entries.length + ' setup(s) detected' : 'Waiting for M5 conditions');
     setMetric('dataStatus', dataStale ? 'STALE' : 'CONNECTED', dataStale ? 'bad' : 'good');
     const freshnessText = freshness.latestCandleAt
       ? 'M5 opened ' + formatTime(freshness.latestCandleAt) + ' • closed ' + (latestM5Close ? formatTime(latestM5Close) : 'unknown') + ' • ' + (freshness.ageMinutes === null ? 'age unknown' : freshness.ageMinutes + ' min since close')
