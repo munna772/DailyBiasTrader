@@ -63,7 +63,9 @@ function parseSiftingBars(response) {
     throw new Error(String(message || 'SiftingIO returned no candle array.'));
   }
   return normalizeCandles(response.data.map(bar => ({
-    time: Number(bar.t),
+    // Preserve the source timestamp; normalizeCandles converts epoch-ms,
+    // epoch-second, and ISO representations to UTC milliseconds.
+    time: bar.t,
     open: Number(bar.o),
     high: Number(bar.h),
     low: Number(bar.l),

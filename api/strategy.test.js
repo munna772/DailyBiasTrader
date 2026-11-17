@@ -38,7 +38,11 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('payload.barTimes'));
   assert.ok(browserUi.includes('latestDataFreshness.stale'));
-  assert.ok(browserUi.includes('Based on latest SiftingIO '));
+  assert.ok(browserUi.includes('timestampSource'));
+  assert.ok(browserUi.includes('last verified completed H1 candle timestamp'));
+  assert.ok(browserUi.includes("interval.key === 'H1'"));
+  assert.ok(browserUi.includes("interval.key === 'M5'"));
+  assert.ok(browserUi.includes('The countdown will not invent a candle or close time.'));
   assert.doesNotMatch(browserUi, /XAGUSD|USOIL|id="symbol"/);
 });
 
@@ -786,6 +790,19 @@ test('SiftingIO history requests fetch a wide enough window and newest bars firs
   assert.equal(now - Date.parse(d1.searchParams.get('start')), 350 * 24 * 60 * 60 * 1000 * 2);
 });
 
+
+test('SiftingIO bar parser normalizes millisecond, second and ISO candle timestamps', () => {
+  const base = Date.parse('2026-11-17T06:00:00Z');
+  const parsed = require('./server').parseSiftingBars({
+    data: [
+      { t: base, o: 100, h: 101, l: 99, c: 100.5, v: 1 },
+      { t: base / 1000 + 3600, o: 100.5, h: 102, l: 100, c: 101, v: 2 },
+      { t: new Date(base + 7200000).toISOString(), o: 101, h: 103, l: 100.5, c: 102, v: 3 }
+    ]
+  });
+  assert.deepEqual(parsed.map(bar => bar.time), [base, base + 3600000, base + 7200000]);
+  assert.equal(buildLatestBarTimes([], parsed, []).H1, new Date(base + 7200000).toISOString());
+});
 
 test('bar countdown receives latest real D1, H1 and M5 timestamps and preserves missing data', () => {
   const d1 = [c('2026-11-14T21:00:00', 100, 101, 99, 100.5), c('2026-11-15T21:00:00', 100.5, 102, 100, 101)];

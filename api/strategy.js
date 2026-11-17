@@ -5,9 +5,20 @@ const DAILY_SWEEP_SCAN_BARS = 260;
 const EQ_LOOKBACK_BARS = 60;
 
 function candleTime(c) {
-  const value = String(c.time);
-  const t = typeof c.time === 'number' ? c.time : Date.parse(value.replace(' ', 'T') + (value.endsWith('Z') ? '' : 'Z'));
-  return Number.isFinite(t) ? t : NaN;
+  const raw = c && c.time;
+  if (raw === null || raw === undefined || raw === '') return NaN;
+  const isNumericValue = typeof raw === 'number' ||
+    (typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw)));
+  const numeric = isNumericValue ? Number(raw) : NaN;
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 1e9 && numeric < 1e11) return numeric * 1000;
+    if (numeric >= 1e14 && numeric < 1e17) return numeric / 1000;
+    return numeric;
+  }
+  const value = String(raw).trim().replace(' ', 'T');
+  const hasTimezone = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(value);
+  const parsed = Date.parse(hasTimezone ? value : value + 'Z');
+  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
 function validCandle(c) {

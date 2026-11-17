@@ -168,6 +168,7 @@ const BAR_INTERVALS = Object.freeze({
 });
 let latestBarTimes = null;
 let latestDataFreshness = null;
+let latestH1Freshness = null;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
 const MANUAL_D1_BIAS_KEY = 'dailybiastrader_manual_d1_bias_v1';
 const MANUAL_H1_BIAS_KEY = 'dailybiastrader_manual_h1_bias_v1';
@@ -327,15 +328,28 @@ function renderBarCountdown(){
     el('barCountdownState').className = 'pill warn';
     el('barCountdownNote').textContent = note;
   };
-  if(!latestDataFreshness || latestDataFreshness.stale === true || latestDataFreshness.status !== 'FRESH'){
+  if(interval.key === 'M5' && (!latestDataFreshness || latestDataFreshness.stale === true || latestDataFreshness.status !== 'FRESH')){
     pause('PAUSED','No fresh M5 feed confirmation. The countdown stays paused rather than inventing a live bar while data is stale or missing.');
     return;
   }
+  if(interval.key === 'H1' && (!latestH1Freshness || latestH1Freshness.stale === true || latestH1Freshness.status !== 'FRESH')){
+    const h1Age = latestH1Freshness && Number.isFinite(Number(latestH1Freshness.ageMinutes))
+      ? ' Last completed H1 close was ' + latestH1Freshness.ageMinutes + ' min ago.'
+      : ' No completed H1 candle timestamp is available.';
+    pause('PAUSED','H1 market data is stale or unavailable; waiting for a fresh, verified H1 candle.' + h1Age);
+    return;
+  }
   const latestRaw = latestBarTimes && latestBarTimes[interval.key];
-  const latestOpen = latestRaw ? Date.parse(latestRaw) : NaN;
+  let latestOpen = latestRaw ? Date.parse(latestRaw) : NaN;
+  let timestampSource = latestRaw ? 'latest SiftingIO candle timestamp' : 'timestamp unavailable';
+  if(interval.key === 'H1' && (!Number.isFinite(latestOpen) || latestOpen <= 0) &&
+     latestH1Freshness && latestH1Freshness.latestCandleAt){
+    latestOpen = Date.parse(latestH1Freshness.latestCandleAt);
+    timestampSource = 'last verified completed H1 candle timestamp';
+  }
   const now = Date.now();
-  if(!Number.isFinite(latestOpen) || latestOpen > now + 60000 || now-latestOpen > interval.maxAgeMs){
-    pause('WAITING FOR BAR','The latest ' + interval.label + ' candle timestamp is missing or too old. No close time is guessed.');
+  if(!Number.isFinite(latestOpen) || latestOpen <= 0 || latestOpen > now + 60000 || now-latestOpen > interval.maxAgeMs){
+    pause('WAITING FOR BAR','No recent valid ' + interval.label + ' candle-open timestamp is available. The countdown will not invent a candle or close time.');
     return;
   }
   const age = Math.max(0,now-latestOpen);
@@ -345,7 +359,7 @@ function renderBarCountdown(){
   el('barCountdownValue').textContent = formatBarCountdown(remaining,interval);
   el('barCountdownState').textContent = 'COUNTING';
   el('barCountdownState').className = 'pill good';
-  el('barCountdownNote').textContent = 'Based on latest SiftingIO ' + interval.label + ' candle timestamp (' + formatTime(latestRaw) + '). TradingView chart feed is independent.';
+  el('barCountdownNote').textContent = 'Based on ' + timestampSource + ' (' + formatTime(new Date(latestOpen).toISOString()) + '). TradingView chart feed is independent.';
 }
 function setMetric(id, text, state){
   const node = el(id);
@@ -512,11 +526,12 @@ async function refreshStrategy(){
     }
     const s = payload.strategy || {};
     const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null };
+    const h1Freshness = payload.h1Freshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null, latestCandleCloseAt: null };
     latestBarTimes = payload.barTimes || null;
     latestDataFreshness = freshness;
+    latestH1Freshness = h1Freshness;
     renderBarCountdown();
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
-    const h1Freshness = payload.h1Freshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null, latestCandleCloseAt: null };
     const h1DataStale = h1Freshness.stale === true || h1Freshness.status === 'STALE' || h1Freshness.status === 'NO_DATA' || h1Freshness.status === 'UNKNOWN';
     updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
     const d1Sweep = s.d1Sweep || null;
