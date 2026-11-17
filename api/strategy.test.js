@@ -685,7 +685,7 @@ test('freshness state gates H1 and M5 UI statuses in both UIs', () => {
     const m5StateIndex = source.indexOf('const dataStale =');
     const h1StateIndex = source.indexOf('const h1Freshness = payload.h1Freshness');
     const h1StatusIndex = source.indexOf("setMetric('h1', h1DisplayState");
-    const entryStatusIndex = source.indexOf("setMetric('entry', dataStale ? 'PAUSED — STALE DATA'");
+    const entryStatusIndex = source.indexOf("setMetric('entry', entriesPaused ? 'PAUSED — STALE DATA'");
     assert.ok(m5StateIndex >= 0 && h1StateIndex > m5StateIndex);
     assert.ok(h1StatusIndex > h1StateIndex);
     assert.ok(entryStatusIndex > m5StateIndex);
