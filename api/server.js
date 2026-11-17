@@ -62,7 +62,7 @@ function parseSiftingBars(response) {
     }
     throw new Error(String(message || 'SiftingIO returned no candle array.'));
   }
-  return normalizeCandles(response.data.map(bar => ({
+  const bars = normalizeCandles(response.data.map(bar => ({
     // Preserve the source timestamp; normalizeCandles converts epoch-ms,
     // epoch-second, and ISO representations to UTC milliseconds.
     time: bar.t,
@@ -72,6 +72,16 @@ function parseSiftingBars(response) {
     close: Number(bar.c),
     volume: Number(bar.v || 0)
   })));
+  const meta = response.meta && typeof response.meta === 'object' ? response.meta : {};
+  // Keep provider response metadata separate from the OHLC rows. It is used
+  // only for diagnostics and never for strategy signals or candle creation.
+  bars.providerMeta = {
+    symbol: meta.symbol || null,
+    interval: meta.interval || null,
+    asOf: meta.as_of || null,
+    hasNextPage: Boolean(meta.next_cursor)
+  };
+  return bars;
 }
 
 // These multipliers convert the requested bar count into a calendar lookback
@@ -215,6 +225,31 @@ function assessH1DataFreshness(rawBars, now = Date.now()) {
   };
 }
 
+function describeSeries(rawBars, interval, now = Date.now()) {
+  const config = HISTORY_INTERVALS[interval];
+  if (!config) throw new TypeError('Unsupported SiftingIO interval: ' + interval);
+  const bars = normalizeCandles(rawBars);
+  const latest = bars.length ? bars[bars.length - 1] : null;
+  const completed = bars.filter(bar => bar.time + config.milliseconds <= Number(now));
+  const latestCompleted = completed.length ? completed[completed.length - 1] : null;
+  const meta = rawBars && rawBars.providerMeta ? rawBars.providerMeta : {};
+  const closeTime = latestCompleted ? latestCompleted.time + config.milliseconds : null;
+  return {
+    interval,
+    receivedBars: bars.length,
+    providerSymbol: meta.symbol || null,
+    providerInterval: meta.interval || null,
+    providerAsOf: meta.asOf || null,
+    hasNextPage: Boolean(meta.hasNextPage),
+    latestBarOpenAt: latest ? new Date(latest.time).toISOString() : null,
+    latestCompletedBarOpenAt: latestCompleted ? new Date(latestCompleted.time).toISOString() : null,
+    latestCompletedBarCloseAt: closeTime === null ? null : new Date(closeTime).toISOString(),
+    latestCompletedAgeMinutes: closeTime === null
+      ? null
+      : Math.floor(Math.max(0, Number(now) - closeTime) / 60000)
+  };
+}
+
 function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
   const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
   const fallbackBars = buildFiveMinuteBarsFromOneMinute(minuteBars, now);
@@ -250,12 +285,13 @@ async function loadMarket(symbolKey) {
     error: null
   };
   let usableFiveMinuteRaw = fiveMinuteRaw;
+  let oneMinuteRaw = [];
   if (!fiveMinuteRaw.length || assessMarketDataFreshness(fiveMinuteRaw, Date.now()).stale) {
     m5Fallback.attempted = true;
     try {
       // Some provider snapshots can lag on the aggregated 5m interval while
       // the underlying 1m series is current. Use actual 1m OHLC as a fallback.
-      const oneMinuteRaw = await fetchSeries(providerSymbol, '1m', 1000);
+      oneMinuteRaw = await fetchSeries(providerSymbol, '1m', 1000);
       const latestMinute = oneMinuteRaw[oneMinuteRaw.length - 1];
       m5Fallback.latestM1At = latestMinute ? new Date(latestMinute.time).toISOString() : null;
       const merged = mergeFiveMinuteBars(fiveMinuteRaw, oneMinuteRaw, Date.now());
@@ -277,6 +313,20 @@ async function loadMarket(symbolKey) {
   }
 
   const now = Date.now();
+  const providerDiagnostics = {
+    D1: describeSeries(dailyRaw, '1d', now),
+    H1: describeSeries(hourlyRaw, '1h', now),
+    M5: describeSeries(usableFiveMinuteRaw, '5m', now),
+    M1: oneMinuteRaw.length ? describeSeries(oneMinuteRaw, '1m', now) : null
+  };
+  console.info('[market-feed] ' + JSON.stringify({
+    symbol: providerSymbol,
+    fetchedAt: new Date(now).toISOString(),
+    D1: providerDiagnostics.D1,
+    H1: providerDiagnostics.H1,
+    M5: providerDiagnostics.M5,
+    M1: providerDiagnostics.M1
+  }));
   const value = {
     d1: completedOnly(dailyRaw, 24 * 60 * 60 * 1000, now),
     h1: completedOnly(hourlyRaw, 60 * 60 * 1000, now),
@@ -285,6 +335,7 @@ async function loadMarket(symbolKey) {
     m5Source: m5Fallback.addedBars ? 'SiftingIO 5m + complete SiftingIO 1m aggregates' : 'SiftingIO 5m',
     m5Fallback,
     barTimes: buildLatestBarTimes(dailyRaw, hourlyRaw, usableFiveMinuteRaw),
+    providerDiagnostics,
     source: PROVIDER,
     providerSymbol,
     fetchedAt: now,
@@ -372,6 +423,7 @@ const server = http.createServer(async (req, res) => {
       dataFreshness: freshness,
       h1Freshness,
       barTimes: market.barTimes,
+      providerDiagnostics: market.providerDiagnostics,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
       m5Source: market.m5Source,
       m5Fallback: market.m5Fallback,
@@ -382,6 +434,7 @@ const server = http.createServer(async (req, res) => {
       strategy: result
     });
   } catch (error) {
+    console.error('[market-feed] strategy request failed: ' + strategyErrorMessage(error));
     const status = Number.isInteger(error.statusCode) ? error.statusCode : 502;
     return send(res, status, {
       ok: false,
@@ -398,4 +451,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries };
