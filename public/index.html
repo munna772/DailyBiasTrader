@@ -559,10 +559,17 @@ async function refreshStrategy(){
       const latestH1Open = h1Freshness.latestCandleAt ? formatTime(h1Freshness.latestCandleAt) : 'unavailable';
       const latestH1Close = h1Freshness.latestCandleCloseAt ? formatTime(h1Freshness.latestCandleCloseAt) : 'unavailable';
       const h1Age = h1Freshness.ageMinutes === null ? 'age unknown' : h1Freshness.ageMinutes + ' min since close';
-      const sweepHistory = s.h1Sweep ? 'A matching H1 sweep exists in the returned history at ' + formatTime(s.h1Sweep.time) + '. ' : 'No matching sweep can be verified from fresh H1 data. ';
-      el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
-        (isManualBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
-        sweepHistory + 'Wait for fresh H1 candles. Missing data is not treated as proof that no sweep occurred.';
+      if(isManualH1 && s.h1Status === 'CONFIRMED'){
+        el('h1Detail').textContent = 'MANUAL ' + s.manualH1Bias + ' H1 CONFIRMATION IS SELECTED (applied at ' + formatTime(manualH1Since) +
+          '). This is a user-selected direction, NOT a detected H1 liquidity sweep. The latest completed H1 candle opened at ' + latestH1Open +
+          ' and closed at ' + latestH1Close + ' (' + h1Age + '); the H1 feed is stale. M5 entries are PAUSED until fresh H1 data is available. ' +
+          'The old candle in history is only a reference and is not proof of a current H1 sweep.';
+      } else {
+        const sweepHistory = s.h1Sweep && !s.h1Sweep.manual ? 'A matching H1 sweep exists in the returned history at ' + formatTime(s.h1Sweep.time) + '. ' : 'No matching sweep can be verified from fresh H1 data. ';
+        el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
+          (isManualBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
+          sweepHistory + 'Wait for fresh H1 candles. Missing data is not treated as proof that no sweep occurred.';
+      }
     } else if(isManualH1 && s.h1Status === 'CONFIRMED'){
       el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 confirmation applied at ' + formatTime(manualH1Since) +
         '. Automatic H1 sweep confirmation is bypassed. Fibonacci uses the latest completed H1 candle before selection (' +
