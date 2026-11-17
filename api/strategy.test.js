@@ -24,7 +24,7 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
   assert.ok(browserUi.includes('id="manualH1Bias"'));
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
-  assert.ok(browserUi.includes('H1 confirmation mode'));
+  assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
   assert.ok(browserUi.includes('Manual H1 confirmation applied'));
   assert.ok(browserUi.includes('M5 monitoring starts after this selection'));
   assert.doesNotMatch(browserUi, /demoConfirmations|DEMO ONLY|DEMO TEST ONLY|Run fake H1/);
@@ -385,10 +385,10 @@ test('manual H1 confirmation uses the latest completed H1 candle as its Fib anch
     c('2026-11-16T09:00:00', 103, 106, 102, 105),
     c('2026-11-16T10:00:00', 105, 107, 104, 106)
   ];
-  const selectedAt = Date.parse('2026-11-16T10:30:00Z');
+  const selectedAt = Date.parse('2026-11-16T11:30:00Z');
   const m5 = [
-    c('2026-11-16T10:25:00', 105, 106, 104, 105),
-    c('2026-11-16T10:30:00', 106, 108, 105, 107)
+    c('2026-11-16T11:25:00', 105, 106, 103, 104),
+    c('2026-11-16T11:30:00', 108, 110, 107, 109)
   ];
   const result = analyzeStrategy({
     d1: [], h1, m5, m5Closed: m5,
