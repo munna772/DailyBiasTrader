@@ -26,7 +26,9 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
   assert.ok(browserUi.includes('Manual H1 confirmation applied'));
-  assert.ok(browserUi.includes('M5 monitoring starts after this selection'));
+  assert.ok(browserUi.includes('Fibonacci rolls forward to the latest completed H1 candle'));
+  assert.ok(browserUi.includes('immediately previous completed H1 candle'));
+  assert.ok(browserUi.includes('older M5 candles are ignored'));
   assert.doesNotMatch(browserUi, /demoConfirmations|DEMO ONLY|DEMO TEST ONLY|Run fake H1/);
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
@@ -395,7 +397,8 @@ test('manual H1 confirmation uses the latest completed H1 candle as its Fib anch
     manualBias: 'BULLISH',
     manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
     manualH1Bias: 'BULLISH',
-    manualH1BiasSince: selectedAt
+    manualH1BiasSince: selectedAt,
+    now: selectedAt
   });
   assert.equal(result.bias, 'BULLISH');
   assert.equal(result.h1Mode, 'MANUAL');
@@ -406,6 +409,38 @@ test('manual H1 confirmation uses the latest completed H1 candle as its Fib anch
   assert.equal(result.manualH1AnchorTime, h1[2].time);
   assert.deepEqual(result.fib, calculateFib(h1[2], 'bullish'));
   assert.equal(result.entries.length, 0, 'the M5 candle opened before H1 selection and must not trigger an entry');
+});
+
+test('manual H1 reference rolls forward to the latest completed candle instead of freezing the old selection candle', () => {
+  const h1 = [
+    c('2026-11-16T08:00:00', 100, 104, 99, 103),
+    c('2026-11-16T09:00:00', 103, 106, 102, 105),
+    c('2026-11-16T10:00:00', 105, 107, 104, 106),
+    c('2026-11-16T11:00:00', 106, 108, 105, 107),
+    c('2026-11-16T12:00:00', 107, 109, 106, 108)
+  ];
+  const selectedAt = Date.parse('2026-11-16T11:30:00Z');
+  const evaluationTime = Date.parse('2026-11-16T13:30:00Z');
+  const oldM5 = c('2026-11-16T12:55:00', 106, 110, 105, 109);
+  const latestM5 = c('2026-11-16T13:00:00', 104, 105, 103, 104);
+  const result = analyzeStrategy({
+    d1: [], h1, m5: [oldM5, latestM5], m5Closed: [oldM5, latestM5],
+    manualBias: 'BULLISH',
+    manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
+    manualH1Bias: 'BULLISH',
+    manualH1BiasSince: selectedAt,
+    now: evaluationTime
+  });
+  const latestReference = h1[4];
+  const latestReferenceClose = latestReference.time + 60 * 60 * 1000;
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.manualH1AnchorTime, latestReference.time);
+  assert.equal(result.manualH1AnchorCloseTime, latestReferenceClose);
+  assert.equal(result.manualH1MonitoringSince, latestReferenceClose);
+  assert.equal(result.h1Sweep.candle.time, latestReference.time);
+  assert.equal(result.h1Sweep.time, latestReferenceClose);
+  assert.deepEqual(result.fib, calculateFib(latestReference, 'bullish'));
+  assert.equal(result.entries.some(entry => entry.time === oldM5.time), false);
 });
 
 test('manual H1 confirmation refuses a direction that conflicts with D1', () => {
@@ -496,17 +531,39 @@ test('second M5 entry requires a completed sweep-and-close candle', () => {
 });
 
 
-test('H1 sweep searches the full available history, including bars older than 500 candles', () => {
+test('AUTO H1 ignores an old historical sweep when the latest completed candle has no sweep', () => {
   const start = Date.parse('2026-10-01T00:00:00Z');
   const bars = [{ time: start, open: 104, high: 106, low: 100, close: 104 }];
-  for (let i = 1; i <= 500; i++) {
+  bars.push({ time: start + 1 * 60 * 60 * 1000, open: 99.5, high: 102, low: 99, close: 100.5 });
+  for (let i = 2; i <= 501; i++) {
     bars.push({ time: start + i * 60 * 60 * 1000, open: 101, high: 102, low: 100.5, close: 101.4 });
   }
-  bars.push({ time: start + 501 * 60 * 60 * 1000, open: 99.5, high: 102, low: 99, close: 100.25 });
-  const result = findHourlySweep(bars, 'bullish', start);
+  const now = start + 502 * 60 * 60 * 1000;
+  assert.equal(findHourlySweep(bars, 'bullish', start, now), null);
+});
+
+test('AUTO H1 compares the latest candle only with the immediately preceding H1 candle', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const first = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const previous = { time: start + 60 * 60 * 1000, open: 101, high: 103, low: 98, close: 102 };
+  const oldLevelOnly = { time: start + 2 * 60 * 60 * 1000, open: 99.5, high: 102, low: 99, close: 100.5 };
+  assert.equal(findHourlySweep([first, previous, oldLevelOnly], 'bullish', start, start + 3 * 60 * 60 * 1000), null);
+  const immediateSweep = { ...oldLevelOnly, low: 97, close: 99 };
+  const result = findHourlySweep([first, previous, immediateSweep], 'bullish', start, start + 3 * 60 * 60 * 1000);
   assert.ok(result);
-  assert.equal(result.level, 100);
-  assert.equal(result.lookbackBars, 501);
+  assert.equal(result.level, previous.low);
+  assert.equal(result.candleTime, immediateSweep.time);
+  assert.equal(result.referenceCandleTime, previous.time);
+  assert.equal(result.lookbackBars, 1);
+});
+
+test('AUTO H1 does not treat an unfinished H1 candle as the latest completed candle', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const candidate = { time: start + 60 * 60 * 1000, open: 101, high: 104, low: 100.5, close: 102 };
+  const unfinished = { time: start + 2 * 60 * 60 * 1000, open: 100, high: 103, low: 97, close: 100.5 };
+  const now = start + 2 * 60 * 60 * 1000 + 30 * 60 * 1000;
+  assert.equal(findHourlySweep([previous, candidate, unfinished], 'bullish', start, now), null);
 });
 
 test('first M5 entry checks the latest intrabar candle instead of re-signalling an old touch', () => {

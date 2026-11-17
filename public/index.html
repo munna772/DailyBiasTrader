@@ -104,7 +104,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   <div class="grid">
     <div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING FOR FEED</b><div class="sub" id="biasDetail">No calculation yet</div></div>
     <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">Requires D1 bias</div></div>
-    <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">WAITING</b><div class="sub" id="entryDetail">Requires H1 sweep</div></div>
+    <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">WAITING</b><div class="sub" id="entryDetail">Requires H1 confirmation</div></div>
     <div class="metric"><small>OHLC DATA</small><b class="wait" id="dataStatus">NOT CONNECTED</b><div class="sub" id="dataDetail">D1 / H1 / M5</div></div>
   </div>
   <div class="notice" id="providerNote" style="margin-top:12px">Strategy candles: SiftingIO. TradingView chart data is independent; the API key stays on the server.</div>
@@ -144,7 +144,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 <section class="panel">
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">D1 sweeps: PDL, PWL, PML, EQL and major swing lows for bullish bias; PDH, PWH, PMH, EQH and major swing highs for bearish bias. A valid sweep trades beyond the level and closes back inside it. D1 confirmation accepts the close beyond the previous candle high/low, engulfing, rejection, displacement, or the specified three-candle inside-bar pattern.</p>
-  <p class="notice">H1 confirmation searches for a matching H1 candle sweep after D1 confirmation. In MANUAL D1 BIAS mode, automatic D1 confirmation is bypassed. H1 confirmation uses completed candles whose close time is after you apply the manual bias; a candle already closed before then is excluded. Fibonacci is drawn across the full high-low range of the H1 sweep candle.</p>
+  <p class="notice">AUTO H1 confirmation checks only the latest completed H1 candle, and compares its high/low with the immediately preceding completed H1 candle. Older historical sweeps are not reused. In MANUAL H1 mode, the selected direction must match D1 and Fibonacci uses the latest completed H1 candle as its reference; M5 monitoring starts after that candle closes and after the manual selection.</p>
   <p class="notice">M5 first entry: touch of 0.5; SL at 0.618 and TP at 0. BUY stop must be below entry; SELL stop must be above entry. Second entry: wait for a completed M5 candle to sweep 0.618 and close back across it; enter at that candle close, with BUY SL at its low or SELL SL at its high; TP remains Fib 0. The 4-pip ($0.40 quoted-price) stop-distance cap applies only to Gold second entries.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
@@ -572,18 +572,28 @@ async function refreshStrategy(){
       }
     } else if(isManualH1 && s.h1Status === 'CONFIRMED'){
       el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 confirmation applied at ' + formatTime(manualH1Since) +
-        '. Automatic H1 sweep confirmation is bypassed. Fibonacci uses the latest completed H1 candle before selection (' +
-        formatTime(s.manualH1AnchorTime || (s.h1Sweep && s.h1Sweep.referenceCandleTime)) +
-        '). M5 monitoring starts after this selection; earlier M5 candles are ignored.';
+        '. Automatic H1 sweep confirmation is bypassed. Fibonacci uses the latest completed H1 candle opened at ' +
+        formatTime(s.manualH1AnchorTime || (s.h1Sweep && s.h1Sweep.referenceCandleTime)) + ' and closed at ' +
+        formatTime(s.manualH1AnchorCloseTime) + '. M5 monitoring starts at ' +
+        formatTime(s.manualH1MonitoringSince || (s.h1Sweep && s.h1Sweep.time)) + '; older M5 candles are ignored.';
     } else if(s.h1Status === 'MANUAL_H1_DIRECTION_MISMATCH'){
       el('h1Detail').textContent = s.h1Reason || 'Manual H1 direction must match the active D1 bias.';
     } else if(s.h1Status === 'WAITING_FOR_MANUAL_H1_CANDLE'){
       el('h1Detail').textContent = s.h1Reason || 'No completed H1 candle is available to anchor Fibonacci.';
     } else {
       el('h1Detail').textContent = s.h1Sweep
-        ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
-        : isManualBias
-          ? 'Waiting for a matching ' + s.bias.toLowerCase() + ' H1 sweep whose candle closes after ' + formatTime(manualSince) + '. ' + (Number(s.h1BarsChecked || 0) === 0 ? 'No eligible completed H1 candles yet.' : 'Checked ' + s.h1BarsChecked + ' eligible completed H1 candle(s); none matched yet.') + ' Candles already closed before that time are ignored.'
+        ? 'Latest completed H1 candle opened at ' + formatTime(s.h1Sweep.candle && s.h1Sweep.candle.time) +
+          ' swept the immediately previous completed H1 candle opened at ' + formatTime(s.h1Sweep.referenceCandleTime) +
+          '. The sweep candle closed at ' + formatTime(s.h1Sweep.time) + '.'
+        : (isManualBias || s.h1Status === 'WAITING_FOR_H1_SWEEP')
+          ? s.h1CandidateTime && s.h1ReferenceTime
+            ? 'Latest completed H1 candle opened at ' + formatTime(s.h1CandidateTime) +
+              ' was checked against the immediately previous H1 candle opened at ' + formatTime(s.h1ReferenceTime) +
+              '; no matching ' + s.bias.toLowerCase() + ' sweep was found. Wait for the next H1 candle to close.'
+            : s.h1CandidateTime
+              ? 'Only one completed H1 candle is available. The app needs the immediately previous H1 candle to verify a sweep.'
+              : 'Waiting for the latest completed H1 candle after ' + formatTime(manualSince || s.h1SearchAfter) +
+                '. It will be compared only with the immediately previous completed H1 candle.'
           : 'Requires matching H1 sweep after D1 confirmation';
     }
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
@@ -660,7 +670,7 @@ function syncManualBiasControls(){
   el('manualH1Bias').value = manualH1Bias ? manualH1Bias.bias : 'AUTO';
   el('manualH1BiasNote').textContent = manualH1Bias
     ? 'MANUAL ' + manualH1Bias.bias + ' H1 confirmation selected at ' + formatTime(manualH1Bias.since) +
-      '. It must match the active D1 direction. The latest completed H1 candle anchors Fibonacci; M5 monitoring starts after selection.'
+      '. It must match the active D1 direction. Fibonacci rolls forward to the latest completed H1 candle; M5 monitoring waits until that candle closes and after your selection.'
     : 'AUTO: H1 confirmation is detected from a matching liquidity sweep after D1 confirmation.';
 }
 el('applyManualD1Bias').addEventListener('click',function(){

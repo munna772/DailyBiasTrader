@@ -352,9 +352,10 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const market = await loadMarket(symbol);
-    const freshness = assessMarketDataFreshness(market.m5);
-    const h1Freshness = assessH1DataFreshness(market.h1);
-    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince });
+    const strategyNow = Date.now();
+    const freshness = assessMarketDataFreshness(market.m5, strategyNow);
+    const h1Freshness = assessH1DataFreshness(market.h1, strategyNow);
+    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince, now: strategyNow });
     const result = gateStrategyOnFreshness(rawStrategy, freshness, h1Freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
