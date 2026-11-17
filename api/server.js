@@ -336,11 +336,25 @@ const server = http.createServer(async (req, res) => {
     manualBias = manualBiasParam;
     manualBiasSince = requestedSince;
   }
+  const manualH1BiasParam = String(url.searchParams.get('manualH1Bias') || '').toUpperCase();
+  let manualH1Bias = null;
+  let manualH1BiasSince = null;
+  if (manualH1BiasParam) {
+    if (manualH1BiasParam !== 'BULLISH' && manualH1BiasParam !== 'BEARISH') {
+      return send(res, 400, { error: 'manualH1Bias must be BULLISH or BEARISH.' });
+    }
+    const requestedSince = Number(url.searchParams.get('manualH1BiasSince'));
+    if (!Number.isFinite(requestedSince) || requestedSince <= 0 || requestedSince > Date.now() + 5 * 60 * 1000) {
+      return send(res, 400, { error: 'A valid manualH1BiasSince timestamp is required. Reapply the manual H1 confirmation.' });
+    }
+    manualH1Bias = manualH1BiasParam;
+    manualH1BiasSince = requestedSince;
+  }
   try {
     const market = await loadMarket(symbol);
     const freshness = assessMarketDataFreshness(market.m5);
     const h1Freshness = assessH1DataFreshness(market.h1);
-    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince });
+    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince });
     const result = gateStrategyOnFreshness(rawStrategy, freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
