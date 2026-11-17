@@ -22,17 +22,15 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL BULLISH'));
   assert.ok(browserUi.includes('MANUAL BEARISH'));
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
+  assert.ok(browserUi.includes('id="manualH1Bias"'));
+  assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
+  assert.ok(browserUi.includes('H1 confirmation mode'));
+  assert.ok(browserUi.includes('Manual H1 confirmation applied'));
+  assert.ok(browserUi.includes('M5 monitoring starts after this selection'));
+  assert.doesNotMatch(browserUi, /demoConfirmations|DEMO ONLY|DEMO TEST ONLY|Run fake H1/);
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
   assert.ok(browserUi.includes('latest completed M5 candle closed at'));
-  assert.ok(browserUi.includes('Run fake H1 + M5 confirmations'));
-  assert.ok(browserUi.includes('DEMO TEST ONLY'));
-  assert.ok(browserUi.includes('No trade is added to statistics'));
-  assert.ok(browserUi.includes('renderDemoConfirmations'));
-  assert.ok(browserUi.includes('SIMULATED: a matching bullish H1 sweep'));
-  assert.ok(browserUi.includes('SIMULATED: an M5 confirmation'));
-  assert.ok(browserUi.includes('Restore the latest real feed state immediately after leaving demo mode.'));
-  assert.ok(browserUi.includes('if(strategyBusy) strategyRefreshPending = true;'));
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
@@ -379,6 +377,65 @@ test('invalid or incomplete manual bias metadata falls back to automatic D1 anal
   const result = analyzeStrategy({d1: [],h1: [],m5: [],manualBias:'BULLISH'});
   assert.equal(result.bias, 'WAITING');
   assert.equal(result.biasMode, 'AUTO');
+});
+
+test('manual H1 confirmation uses the latest completed H1 candle as its Fib anchor and starts M5 after selection', () => {
+  const h1 = [
+    c('2026-11-16T08:00:00', 100, 104, 99, 103),
+    c('2026-11-16T09:00:00', 103, 106, 102, 105),
+    c('2026-11-16T10:00:00', 105, 107, 104, 106)
+  ];
+  const selectedAt = Date.parse('2026-11-16T10:30:00Z');
+  const m5 = [
+    c('2026-11-16T10:25:00', 105, 106, 104, 105),
+    c('2026-11-16T10:30:00', 106, 108, 105, 107)
+  ];
+  const result = analyzeStrategy({
+    d1: [], h1, m5, m5Closed: m5,
+    manualBias: 'BULLISH',
+    manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
+    manualH1Bias: 'BULLISH',
+    manualH1BiasSince: selectedAt
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.h1Mode, 'MANUAL');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Sweep.manual, true);
+  assert.equal(result.h1Sweep.candle.time, h1[2].time);
+  assert.equal(result.h1Sweep.time, selectedAt);
+  assert.equal(result.manualH1AnchorTime, h1[2].time);
+  assert.deepEqual(result.fib, calculateFib(h1[2], 'bullish'));
+  assert.equal(result.entries.length, 0, 'the M5 candle opened before H1 selection and must not trigger an entry');
+});
+
+test('manual H1 confirmation refuses a direction that conflicts with D1', () => {
+  const h1 = [c('2026-11-16T09:00:00', 103, 106, 102, 105)];
+  const result = analyzeStrategy({
+    d1: [], h1, m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
+    manualH1Bias: 'BEARISH',
+    manualH1BiasSince: Date.parse('2026-11-16T10:30:00Z')
+  });
+  assert.equal(result.h1Status, 'MANUAL_H1_DIRECTION_MISMATCH');
+  assert.equal(result.h1Mode, 'MANUAL');
+  assert.equal(result.entries.length, 0);
+  assert.equal(result.fib, null);
+});
+
+test('manual H1 confirmation requires a completed reference candle', () => {
+  const h1 = [c('2026-11-16T10:00:00', 105, 107, 104, 106)];
+  const selectedAt = Date.parse('2026-11-16T10:30:00Z');
+  const result = analyzeStrategy({
+    d1: [], h1, m5: [],
+    manualBias: 'BULLISH',
+    manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
+    manualH1Bias: 'BULLISH',
+    manualH1BiasSince: selectedAt
+  });
+  assert.equal(result.h1Status, 'WAITING_FOR_MANUAL_H1_CANDLE');
+  assert.equal(result.fib, null);
+  assert.equal(result.entries.length, 0);
 });
 
 test('D1 confirmation must occur after the liquidity-sweep candle', () => {
