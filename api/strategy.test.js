@@ -633,7 +633,7 @@ test('stale M5 candles cannot produce actionable entry signals', () => {
     entries: [{ type: 'SECOND_ENTRY', setupValid: true }],
     riskWarning: 'obsolete risk warning'
   };
-  const gated = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false }, { status: 'STALE', stale: true });
+  const gated = gateStrategyOnFreshness(strategy, { status: 'STALE', stale: true }, { status: 'FRESH', stale: false });
   assert.equal(gated.entryStatus, 'WAITING_FOR_FRESH_M5_DATA');
   assert.deepEqual(gated.entries, []);
   assert.equal(gated.riskWarning, null);
