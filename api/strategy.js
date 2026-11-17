@@ -391,11 +391,18 @@ function assessMarketDataFreshness(rawBars, now = Date.now()) {
   };
 }
 
-function gateStrategyOnFreshness(strategy, freshness) {
-  if (!freshness || !freshness.stale || strategy.h1Status !== 'CONFIRMED') return strategy;
+function gateStrategyOnFreshness(strategy, m5Freshness, h1Freshness) {
+  if (!strategy || strategy.h1Status !== 'CONFIRMED') return strategy;
+
+  // H1 data determines the active confirmation/Fibonacci reference; M5 data
+  // determines entry timing. Missing or stale data from either feed blocks entries.
+  const h1Stale = !h1Freshness || h1Freshness.stale === true || h1Freshness.status !== 'FRESH';
+  const m5Stale = !m5Freshness || m5Freshness.stale === true || m5Freshness.status !== 'FRESH';
+  if (!h1Stale && !m5Stale) return strategy;
+
   return {
     ...strategy,
-    entryStatus: 'WAITING_FOR_FRESH_M5_DATA',
+    entryStatus: h1Stale ? 'WAITING_FOR_FRESH_H1_DATA' : 'WAITING_FOR_FRESH_M5_DATA',
     entries: [],
     riskWarning: null
   };
