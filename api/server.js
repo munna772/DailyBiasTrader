@@ -355,7 +355,7 @@ const server = http.createServer(async (req, res) => {
     const freshness = assessMarketDataFreshness(market.m5);
     const h1Freshness = assessH1DataFreshness(market.h1);
     const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince });
-    const result = gateStrategyOnFreshness(rawStrategy, freshness);
+    const result = gateStrategyOnFreshness(rawStrategy, freshness, h1Freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
       ? findHistoricalM5Entries(market.m5Closed, strategySide, rawStrategy.h1Sweep.time, rawStrategy.fib, symbol)
