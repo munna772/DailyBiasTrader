@@ -633,7 +633,7 @@ test('stale M5 candles cannot produce actionable entry signals', () => {
     entries: [{ type: 'SECOND_ENTRY', setupValid: true }],
     riskWarning: 'obsolete risk warning'
   };
-  const gated = gateStrategyOnFreshness(strategy, { status: 'STALE', stale: true });
+  const gated = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false }, { status: 'STALE', stale: true });
   assert.equal(gated.entryStatus, 'WAITING_FOR_FRESH_M5_DATA');
   assert.deepEqual(gated.entries, []);
   assert.equal(gated.riskWarning, null);
@@ -642,8 +642,40 @@ test('stale M5 candles cannot produce actionable entry signals', () => {
 
 test('fresh M5 data preserves the strategy result unchanged', () => {
   const strategy = { h1Status: 'CONFIRMED', entryStatus: 'ENTRY_DETECTED', entries: [{ type: 'FIRST_ENTRY' }] };
-  const result = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false });
+  const result = gateStrategyOnFreshness(strategy, { status: 'FRESH', stale: false }, { status: 'FRESH', stale: false });
   assert.equal(result, strategy);
+});
+
+test('stale or missing H1 data blocks M5 entries in AUTO and MANUAL H1 modes', () => {
+  const m5Fresh = { status: 'FRESH', stale: false };
+  for (const h1Mode of ['AUTO', 'MANUAL']) {
+    const strategy = {
+      h1Status: 'CONFIRMED',
+      h1Mode,
+      entryStatus: 'ENTRY_DETECTED',
+      entries: [{ type: 'FIRST_ENTRY', setupValid: true }],
+      riskWarning: 'obsolete risk warning'
+    };
+    const stale = gateStrategyOnFreshness(strategy, m5Fresh, { status: 'STALE', stale: true });
+    assert.equal(stale.entryStatus, 'WAITING_FOR_FRESH_H1_DATA');
+    assert.deepEqual(stale.entries, []);
+    assert.equal(stale.riskWarning, null);
+
+    const missing = gateStrategyOnFreshness(strategy, m5Fresh, { status: 'NO_DATA', stale: true });
+    assert.equal(missing.entryStatus, 'WAITING_FOR_FRESH_H1_DATA');
+    assert.deepEqual(missing.entries, []);
+  }
+});
+
+test('when both feeds are stale, H1 freshness is reported as the primary blocker', () => {
+  const strategy = { h1Status: 'CONFIRMED', entryStatus: 'ENTRY_DETECTED', entries: [{ type: 'SECOND_ENTRY' }] };
+  const result = gateStrategyOnFreshness(
+    strategy,
+    { status: 'STALE', stale: true },
+    { status: 'STALE', stale: true }
+  );
+  assert.equal(result.entryStatus, 'WAITING_FOR_FRESH_H1_DATA');
+  assert.deepEqual(result.entries, []);
 });
 
 
@@ -660,6 +692,18 @@ test('freshness state gates H1 and M5 UI statuses in both UIs', () => {
     assert.ok(source.includes('STALE H1 DATA'));
     assert.ok(source.includes('PAUSED — STALE DATA'));
     assert.ok(source.includes('Missing data is not treated as proof that no sweep occurred.'));
+    assert.ok(source.includes('H1 FIBONACCI — REFERENCE CANDLE RANGE'));
+    assert.ok(source.includes('No M5 entry condition detected after H1 confirmation.'));
+    assert.ok(source.includes('const h1EntryPaused = h1DataStale && s.h1Status === \'CONFIRMED\';'));
+    const staleBlockStart = source.indexOf('if(h1DataStale){');
+    const manualStaleBranch = source.indexOf(`if(isManualH1 && s.h1Status === 'CONFIRMED')`, staleBlockStart);
+    const genericSweepHistory = source.indexOf('const sweepHistory =', staleBlockStart);
+    assert.ok(manualStaleBranch > staleBlockStart);
+    assert.ok(genericSweepHistory > manualStaleBranch);
+    const manualBranchText = source.slice(manualStaleBranch, genericSweepHistory);
+    assert.ok(manualBranchText.includes('NOT a detected H1 liquidity sweep'));
+    assert.ok(manualBranchText.includes('M5 entries are PAUSED until fresh H1 data is available'));
+    assert.ok(source.includes('Entries are not evaluated until fresh H1 data is available.') || source.includes('Entry conditions are not evaluated until fresh H1 data is available.'));
   }
 });
 
