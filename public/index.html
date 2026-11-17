@@ -81,11 +81,6 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 
 <section class="panel">
   <div class="row"><div class="section-title">STRATEGY STATUS</div><button id="refreshStrategy">Refresh signals</button></div>
-  <div class="row" style="margin:6px 0 10px;justify-content:flex-start;flex-wrap:wrap">
-    <button id="demoConfirmations" type="button" aria-pressed="false">Run fake H1 + M5 confirmations</button>
-    <span class="pill warn" id="demoStatus">DEMO OFF</span>
-  </div>
-  <div class="notice warn" id="demoNote" style="display:none;margin-bottom:10px">DEMO TEST ONLY — H1 and M5 confirmations below are simulated. No fake candles or prices are created, no trade is added to statistics, and no real strategy signal is generated. Click the button again to return to live status.</div>
   <div class="row" style="margin:2px 0 8px;justify-content:flex-start;flex-wrap:wrap">
     <label for="manualD1Bias" class="sub" style="margin-right:3px">D1 BIAS MODE</label>
     <select id="manualD1Bias" aria-label="D1 bias mode">
@@ -96,6 +91,16 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     <button id="applyManualD1Bias">Apply</button>
   </div>
   <div class="notice" id="manualBiasNote" style="margin-bottom:10px">AUTO: D1 bias is calculated from the D1 liquidity-sweep and confirmation rules.</div>
+  <div class="row" style="margin:2px 0 8px;justify-content:flex-start;flex-wrap:wrap">
+    <label for="manualH1Bias" class="sub" style="margin-right:3px">H1 CONFIRMATION MODE</label>
+    <select id="manualH1Bias" aria-label="H1 confirmation mode">
+      <option value="AUTO">AUTO</option>
+      <option value="BULLISH">MANUAL BULLISH</option>
+      <option value="BEARISH">MANUAL BEARISH</option>
+    </select>
+    <button id="applyManualH1Bias">Apply</button>
+  </div>
+  <div class="notice" id="manualH1BiasNote" style="margin-bottom:10px">AUTO: H1 confirmation is detected from a matching liquidity sweep after D1 confirmation.</div>
   <div class="grid">
     <div class="metric"><small>D1 BIAS</small><b class="wait" id="bias">WAITING FOR FEED</b><div class="sub" id="biasDetail">No calculation yet</div></div>
     <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">Requires D1 bias</div></div>
@@ -165,8 +170,8 @@ let latestBarTimes = null;
 let latestDataFreshness = null;
 const TRADE_LEDGER_KEY = 'dailybiastrader_trade_ledger_v1';
 const MANUAL_D1_BIAS_KEY = 'dailybiastrader_manual_d1_bias_v1';
+const MANUAL_H1_BIAS_KEY = 'dailybiastrader_manual_h1_bias_v1';
 let strategyRefreshPending = false;
-let demoConfirmationsEnabled = false;
 function loadManualD1Bias(){
   try{
     const raw = localStorage.getItem(MANUAL_D1_BIAS_KEY);
@@ -180,6 +185,19 @@ function loadManualD1Bias(){
   return null;
 }
 let manualD1Bias = loadManualD1Bias();
+function loadManualH1Bias(){
+  try{
+    const raw = localStorage.getItem(MANUAL_H1_BIAS_KEY);
+    if(!raw) return null;
+    const saved = JSON.parse(raw);
+    if(saved && (saved.bias === 'BULLISH' || saved.bias === 'BEARISH') &&
+       Number.isFinite(Number(saved.since)) && Number(saved.since) > 0) {
+      return {bias:saved.bias,since:Number(saved.since)};
+    }
+  }catch(error){}
+  return null;
+}
+let manualH1Bias = loadManualH1Bias();
 let tradeStorageAvailable = true;
 let tradeLedger = loadTradeLedger();
 
@@ -467,22 +485,6 @@ function renderEntries(entries){
     target.appendChild(row);
   });
 }
-function renderDemoConfirmations(){
-  const button = el('demoConfirmations');
-  const status = el('demoStatus');
-  const note = el('demoNote');
-  button.setAttribute('aria-pressed', demoConfirmationsEnabled ? 'true' : 'false');
-  button.textContent = demoConfirmationsEnabled ? 'Clear fake confirmations' : 'Run fake H1 + M5 confirmations';
-  status.textContent = demoConfirmationsEnabled ? 'DEMO ACTIVE' : 'DEMO OFF';
-  status.className = demoConfirmationsEnabled ? 'pill warn' : 'pill';
-  note.style.display = demoConfirmationsEnabled ? 'block' : 'none';
-  if(!demoConfirmationsEnabled) return;
-  setMetric('h1','DEMO CONFIRMED','wait');
-  el('h1Detail').textContent = 'SIMULATED: a matching bullish H1 sweep is being treated as confirmed for this display test. No H1 candle was read or created.';
-  setMetric('entry','DEMO M5 CONFIRMED','wait');
-  el('entryDetail').textContent = 'SIMULATED: an M5 confirmation is being displayed after the fake H1 confirmation. This is not a real entry and has no entry, stop-loss or take-profit price.';
-  el('entries').textContent = 'DEMO ONLY — simulated H1 confirmation → simulated M5 confirmation. No trade setup or prices were generated.';
-}
 async function refreshStrategy(){
   if(strategyBusy) return;
   strategyBusy = true;
@@ -495,6 +497,10 @@ async function refreshStrategy(){
     if(manualD1Bias){
       strategyUrl += '&manualBias=' + encodeURIComponent(manualD1Bias.bias) +
         '&manualBiasSince=' + encodeURIComponent(String(manualD1Bias.since));
+    }
+    if(manualH1Bias){
+      strategyUrl += '&manualH1Bias=' + encodeURIComponent(manualH1Bias.bias) +
+        '&manualH1BiasSince=' + encodeURIComponent(String(manualH1Bias.since));
     }
     const response = await fetch(strategyUrl, {
       method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:requestController ? requestController.signal : undefined
@@ -516,6 +522,8 @@ async function refreshStrategy(){
     const d1Sweep = s.d1Sweep || null;
     const isManualBias = s.biasMode === 'MANUAL';
     const manualSince = Number(s.manualBiasSince || (manualD1Bias && manualD1Bias.since) || 0);
+    const isManualH1 = s.h1Mode === 'MANUAL';
+    const manualH1Since = Number(s.manualH1BiasSince || (manualH1Bias && manualH1Bias.since) || 0);
     setMetric('bias',
       s.bias === 'WAITING' && d1Sweep ? 'SWEEP DETECTED' : (s.bias || 'WAITING'),
       s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
@@ -539,9 +547,12 @@ async function refreshStrategy(){
     } else {
       el('biasDetail').textContent = s.biasReason || 'No D1 confirmation';
     }
-    const normalH1State = s.h1Status === 'CONFIRMED' ? 'CONFIRMED' : (s.h1Status || 'WAITING').replace(/_/g,' ');
+    const normalH1State = s.h1Status === 'CONFIRMED' ? (isManualH1 ? 'MANUAL CONFIRMED' : 'CONFIRMED') :
+      s.h1Status === 'MANUAL_H1_DIRECTION_MISMATCH' ? 'DIRECTION MISMATCH' :
+      s.h1Status === 'WAITING_FOR_MANUAL_H1_CANDLE' ? 'WAITING FOR H1 CANDLE' :
+      (s.h1Status || 'WAITING').replace(/_/g,' ');
     const h1DisplayState = h1DataStale
-      ? (s.h1Status === 'CONFIRMED' ? 'CONFIRMED • STALE' : h1Freshness.status === 'NO_DATA' ? 'NO H1 DATA' : 'STALE H1 DATA')
+      ? (s.h1Status === 'CONFIRMED' ? (isManualH1 ? 'MANUAL • STALE DATA' : 'CONFIRMED • STALE') : h1Freshness.status === 'NO_DATA' ? 'NO H1 DATA' : 'STALE H1 DATA')
       : normalH1State;
     setMetric('h1', h1DisplayState, h1DataStale ? 'bad' : s.h1Status === 'CONFIRMED' ? 'good' : 'wait');
     if(h1DataStale){
@@ -552,6 +563,15 @@ async function refreshStrategy(){
       el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
         (isManualBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
         sweepHistory + 'Wait for fresh H1 candles. Missing data is not treated as proof that no sweep occurred.';
+    } else if(isManualH1 && s.h1Status === 'CONFIRMED'){
+      el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 confirmation applied at ' + formatTime(manualH1Since) +
+        '. Automatic H1 sweep confirmation is bypassed. Fibonacci uses the latest completed H1 candle before selection (' +
+        formatTime(s.manualH1AnchorTime || (s.h1Sweep && s.h1Sweep.referenceCandleTime)) +
+        '). M5 monitoring starts after this selection; earlier M5 candles are ignored.';
+    } else if(s.h1Status === 'MANUAL_H1_DIRECTION_MISMATCH'){
+      el('h1Detail').textContent = s.h1Reason || 'Manual H1 direction must match the active D1 bias.';
+    } else if(s.h1Status === 'WAITING_FOR_MANUAL_H1_CANDLE'){
+      el('h1Detail').textContent = s.h1Reason || 'No completed H1 candle is available to anchor Fibonacci.';
     } else {
       el('h1Detail').textContent = s.h1Sweep
         ? 'Sweep candle: ' + formatTime(s.h1Sweep.time)
@@ -587,7 +607,6 @@ async function refreshStrategy(){
     el('riskWarning').classList.toggle('hidden', !s.riskWarning);
     renderFib(s.fib);
     renderEntries(s.entries);
-    renderDemoConfirmations();
   }catch(error){
     latestDataFreshness = {status:'UNKNOWN',stale:true};
     renderBarCountdown();
@@ -610,7 +629,6 @@ async function refreshStrategy(){
     setMetric('entry','DISABLED','wait');
     renderFib(null);
     el('entries').textContent = 'No real market data received. Signals are disabled.';
-    renderDemoConfirmations();
   }finally{
     clearTimeout(requestTimeout);
     strategyBusy = false;
@@ -625,8 +643,13 @@ function syncManualBiasControls(){
   el('manualD1Bias').value = manualD1Bias ? manualD1Bias.bias : 'AUTO';
   el('manualBiasNote').textContent = manualD1Bias
     ? 'MANUAL ' + manualD1Bias.bias + ' active since ' + formatTime(manualD1Bias.since) +
-      '. Automatic D1 confirmation is bypassed. Only a matching H1 candle closing after this selection can confirm.'
+      '. Automatic D1 confirmation is bypassed. H1 must confirm in the same direction.'
     : 'AUTO: D1 bias is calculated from the D1 liquidity-sweep and confirmation rules.';
+  el('manualH1Bias').value = manualH1Bias ? manualH1Bias.bias : 'AUTO';
+  el('manualH1BiasNote').textContent = manualH1Bias
+    ? 'MANUAL ' + manualH1Bias.bias + ' H1 confirmation selected at ' + formatTime(manualH1Bias.since) +
+      '. It must match the active D1 direction. The latest completed H1 candle anchors Fibonacci; M5 monitoring starts after selection.'
+    : 'AUTO: H1 confirmation is detected from a matching liquidity sweep after D1 confirmation.';
 }
 el('applyManualD1Bias').addEventListener('click',function(){
   const selected = el('manualD1Bias').value;
@@ -636,6 +659,19 @@ el('applyManualD1Bias').addEventListener('click',function(){
   }else if(selected === 'BULLISH' || selected === 'BEARISH'){
     manualD1Bias = {bias:selected,since:Date.now()};
     try{ localStorage.setItem(MANUAL_D1_BIAS_KEY,JSON.stringify(manualD1Bias)); }catch(error){}
+  }
+  syncManualBiasControls();
+  if(strategyBusy) strategyRefreshPending = true;
+  else refreshStrategy();
+});
+el('applyManualH1Bias').addEventListener('click',function(){
+  const selected = el('manualH1Bias').value;
+  if(selected === 'AUTO'){
+    manualH1Bias = null;
+    try{ localStorage.removeItem(MANUAL_H1_BIAS_KEY); }catch(error){}
+  }else if(selected === 'BULLISH' || selected === 'BEARISH'){
+    manualH1Bias = {bias:selected,since:Date.now()};
+    try{ localStorage.setItem(MANUAL_H1_BIAS_KEY,JSON.stringify(manualH1Bias)); }catch(error){}
   }
   syncManualBiasControls();
   if(strategyBusy) strategyRefreshPending = true;
@@ -651,15 +687,6 @@ document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
 });
 el('reloadChart').addEventListener('click',renderChart);
 el('refreshStrategy').addEventListener('click',refreshStrategy);
-el('demoConfirmations').addEventListener('click',function(){
-  demoConfirmationsEnabled = !demoConfirmationsEnabled;
-  renderDemoConfirmations();
-  if(!demoConfirmationsEnabled){
-    // Restore the latest real feed state immediately after leaving demo mode.
-    if(strategyBusy) strategyRefreshPending = true;
-    else refreshStrategy();
-  }
-});
 window.addEventListener('offline',function(){
   chartWasOffline = true;
   latestDataFreshness = {status:'OFFLINE',stale:true};
