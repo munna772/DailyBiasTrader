@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness } = require('./server');
+const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -791,17 +791,35 @@ test('SiftingIO history requests fetch a wide enough window and newest bars firs
 });
 
 
-test('SiftingIO bar parser normalizes millisecond, second and ISO candle timestamps', () => {
+test('SiftingIO bar parser normalizes timestamps and retains provider freshness metadata', () => {
   const base = Date.parse('2026-11-17T06:00:00Z');
-  const parsed = require('./server').parseSiftingBars({
+  const parsed = parseSiftingBars({
     data: [
       { t: base, o: 100, h: 101, l: 99, c: 100.5, v: 1 },
       { t: base / 1000 + 3600, o: 100.5, h: 102, l: 100, c: 101, v: 2 },
       { t: new Date(base + 7200000).toISOString(), o: 101, h: 103, l: 100.5, c: 102, v: 3 }
-    ]
+    ],
+    meta: { symbol: 'XAUUSD', interval: '1h', as_of: '2026-11-17T08:59:00Z', next_cursor: 'cursor-token' }
   });
   assert.deepEqual(parsed.map(bar => bar.time), [base, base + 3600000, base + 7200000]);
   assert.equal(buildLatestBarTimes([], parsed, []).H1, new Date(base + 7200000).toISOString());
+  assert.deepEqual(parsed.providerMeta, {
+    symbol: 'XAUUSD', interval: '1h', asOf: '2026-11-17T08:59:00Z', hasNextPage: true
+  });
+});
+
+test('provider diagnostics compare SiftingIO as-of time with the latest completed H1 bar', () => {
+  const base = Date.parse('2026-11-17T06:00:00Z');
+  const parsed = parseSiftingBars({
+    data: [{ t: base, o: 100, h: 101, l: 99, c: 100.5, v: 1 }],
+    meta: { symbol: 'XAUUSD', interval: '1h', as_of: '2026-11-17T07:59:00Z' }
+  });
+  const diagnostics = describeSeries(parsed, '1h', Date.parse('2026-11-17T07:30:00Z'));
+  assert.equal(diagnostics.receivedBars, 1);
+  assert.equal(diagnostics.providerAsOf, '2026-11-17T07:59:00Z');
+  assert.equal(diagnostics.latestCompletedBarCloseAt, '2026-11-17T07:00:00.000Z');
+  assert.equal(diagnostics.latestCompletedAgeMinutes, 30);
+  assert.equal(diagnostics.hasNextPage, false);
 });
 
 test('bar countdown receives latest real D1, H1 and M5 timestamps and preserves missing data', () => {
