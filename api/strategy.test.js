@@ -35,7 +35,7 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
   assert.ok(browserUi.includes('latest completed M5 candle closed at'));
-  assert.ok(browserUi.includes('completed H1 candles that close after this time'));
+  assert.ok(browserUi.includes('Waiting for the latest completed H1 candle after your daily-bias selection at'));
   assert.ok(browserUi.includes('s.h1CandidateTime'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('AUTO_H1_CONFIRMATION_KEY'));
