@@ -631,7 +631,9 @@ async function refreshStrategy(){
     renderBarCountdown();
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     const h1DataStale = h1Freshness.stale === true || h1Freshness.status === 'STALE' || h1Freshness.status === 'NO_DATA' || h1Freshness.status === 'UNKNOWN';
-    updateTradeLedger(payload.m5Closed || [],payload.historicalEntries || s.entries || []);
+    const ledgerEntries = (Array.isArray(payload.historicalEntries) ? payload.historicalEntries : [])
+      .concat(Array.isArray(s.entries) ? s.entries : []);
+    updateTradeLedger(payload.m5Closed || [],ledgerEntries);
     const d1Sweep = s.d1Sweep || null;
     const isManualBias = s.biasMode === 'MANUAL';
     const manualSince = Number(s.manualBiasSince || (manualD1Bias && manualD1Bias.since) || 0);
