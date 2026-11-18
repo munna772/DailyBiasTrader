@@ -182,6 +182,13 @@ function buildHourlyBarsFromOneMinute(rawBars, now = Date.now()) {
   return normalizeCandles(result);
 }
 
+function marketDataFreshForEntries(m5Freshness, h1Freshness) {
+  return Boolean(
+    m5Freshness && m5Freshness.status === 'FRESH' && m5Freshness.stale === false &&
+    h1Freshness && h1Freshness.status === 'FRESH' && h1Freshness.stale === false
+  );
+}
+
 function mergeHourlyBars(primaryBars, minuteBars, now = Date.now()) {
   const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
   const fallbackBars = buildHourlyBarsFromOneMinute(minuteBars, now);
@@ -510,8 +517,9 @@ const server = http.createServer(async (req, res) => {
     const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince, activeH1, now: strategyNow });
     const result = gateStrategyOnFreshness(rawStrategy, freshness, h1Freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
-    const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
-      ? findHistoricalM5Entries(market.m5Closed, strategySide, rawStrategy.h1Sweep.time, rawStrategy.fib, symbol)
+    const historicalEntries = marketDataFreshForEntries(freshness, h1Freshness) &&
+      rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
+      ? findHistoricalM5Entries(market.m5Closed, strategySide, rawStrategy.h1Sweep.time, rawStrategy.fib)
       : [];
     return send(res, 200, {
       ok: true,
@@ -552,4 +560,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries };
