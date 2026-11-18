@@ -142,6 +142,58 @@ function completedOnly(bars, durationMs, now) {
   return bars.filter(bar => bar.time + durationMs <= now);
 }
 
+// Rebuild only fully completed H1 buckets from 60 real, consecutive,
+// completed one-minute SiftingIO candles. Missing minutes are never guessed.
+function buildHourlyBarsFromOneMinute(rawBars, now = Date.now()) {
+  const MINUTE_MS = 60 * 1000;
+  const HOUR_MS = 60 * MINUTE_MS;
+  const minuteBars = completedOnly(normalizeCandles(rawBars), MINUTE_MS, Number(now))
+    .filter(bar => Number.isSafeInteger(bar.time) && bar.time % MINUTE_MS === 0);
+  const groups = new Map();
+  for (const bar of minuteBars) {
+    const bucketTime = Math.floor(bar.time / HOUR_MS) * HOUR_MS;
+    if (!groups.has(bucketTime)) groups.set(bucketTime, new Map());
+    groups.get(bucketTime).set(bar.time, bar);
+  }
+
+  const result = [];
+  for (const [bucketTime, minutes] of groups) {
+    if (bucketTime + HOUR_MS > Number(now)) continue;
+    const ordered = [];
+    let complete = true;
+    for (let index = 0; index < 60; index += 1) {
+      const minute = minutes.get(bucketTime + index * MINUTE_MS);
+      if (!minute) {
+        complete = false;
+        break;
+      }
+      ordered.push(minute);
+    }
+    if (!complete) continue;
+    result.push({
+      time: bucketTime,
+      open: ordered[0].open,
+      high: Math.max(...ordered.map(bar => bar.high)),
+      low: Math.min(...ordered.map(bar => bar.low)),
+      close: ordered[59].close,
+      volume: ordered.reduce((sum, bar) => sum + (Number(bar.volume) || 0), 0)
+    });
+  }
+  return normalizeCandles(result);
+}
+
+function mergeHourlyBars(primaryBars, minuteBars, now = Date.now()) {
+  const merged = new Map(normalizeCandles(primaryBars).map(bar => [bar.time, bar]));
+  const fallbackBars = buildHourlyBarsFromOneMinute(minuteBars, now);
+  let added = 0;
+  for (const bar of fallbackBars) {
+    if (merged.has(bar.time)) continue;
+    merged.set(bar.time, bar);
+    added += 1;
+  }
+  return { bars: normalizeCandles([...merged.values()]).slice(-1000), added, fallbackBars };
+}
+
 // Rebuild only fully completed 5-minute buckets from five real, consecutive
 // one-minute SiftingIO candles. Missing minutes are never guessed or filled.
 function buildFiveMinuteBarsFromOneMinute(rawBars, now = Date.now()) {
@@ -284,27 +336,54 @@ async function loadMarket(symbolKey) {
     latestM1At: null,
     error: null
   };
+  let h1Fallback = {
+    attempted: false,
+    addedBars: 0,
+    latestM1At: null,
+    error: null
+  };
   let usableFiveMinuteRaw = fiveMinuteRaw;
+  let usableHourlyRaw = hourlyRaw;
   let oneMinuteRaw = [];
-  if (!fiveMinuteRaw.length || assessMarketDataFreshness(fiveMinuteRaw, Date.now()).stale) {
-    m5Fallback.attempted = true;
+  const initialNow = Date.now();
+  const m5NeedsFallback = !fiveMinuteRaw.length ||
+    assessMarketDataFreshness(fiveMinuteRaw, initialNow).stale;
+  const h1NeedsFallback = !hourlyRaw.length ||
+    assessH1DataFreshness(hourlyRaw, initialNow).stale;
+  m5Fallback.attempted = m5NeedsFallback;
+  h1Fallback.attempted = h1NeedsFallback;
+
+  // The provider's H1 endpoint can report a current response while its newest
+  // H1 candle is old. When that happens, retrieve real M1 candles once and
+  // rebuild only complete H1 hours from all 60 consecutive completed minutes.
+  if (m5NeedsFallback || h1NeedsFallback) {
     try {
-      // Some provider snapshots can lag on the aggregated 5m interval while
-      // the underlying 1m series is current. Use actual 1m OHLC as a fallback.
       oneMinuteRaw = await fetchSeries(providerSymbol, '1m', 1000);
       const latestMinute = oneMinuteRaw[oneMinuteRaw.length - 1];
-      m5Fallback.latestM1At = latestMinute ? new Date(latestMinute.time).toISOString() : null;
-      const merged = mergeFiveMinuteBars(fiveMinuteRaw, oneMinuteRaw, Date.now());
-      usableFiveMinuteRaw = merged.bars;
-      m5Fallback.addedBars = merged.added;
+      const latestM1At = latestMinute ? new Date(latestMinute.time).toISOString() : null;
+      m5Fallback.latestM1At = latestM1At;
+      h1Fallback.latestM1At = latestM1At;
+
+      if (m5NeedsFallback) {
+        const mergedM5 = mergeFiveMinuteBars(fiveMinuteRaw, oneMinuteRaw, Date.now());
+        usableFiveMinuteRaw = mergedM5.bars;
+        m5Fallback.addedBars = mergedM5.added;
+      }
+      if (h1NeedsFallback) {
+        const mergedH1 = mergeHourlyBars(hourlyRaw, oneMinuteRaw, Date.now());
+        usableHourlyRaw = mergedH1.bars;
+        h1Fallback.addedBars = mergedH1.added;
+      }
     } catch (error) {
-      m5Fallback.error = error && error.message ? error.message : 'One-minute fallback request failed.';
+      const message = error && error.message ? error.message : 'One-minute fallback request failed.';
+      if (m5NeedsFallback) m5Fallback.error = message;
+      if (h1NeedsFallback) h1Fallback.error = message;
     }
   }
 
   const incomplete = [];
   if (dailyRaw.length < 8) incomplete.push('D1=' + dailyRaw.length + ' (need at least 8)');
-  if (hourlyRaw.length < 2) incomplete.push('H1=' + hourlyRaw.length + ' (need at least 2)');
+  if (usableHourlyRaw.length < 2) incomplete.push('H1=' + usableHourlyRaw.length + ' (need at least 2)');
   if (usableFiveMinuteRaw.length < 10) incomplete.push('M5=' + usableFiveMinuteRaw.length + ' (need at least 10)');
   if (incomplete.length) {
     const error = new Error('SiftingIO returned incomplete OHLC history: ' + incomplete.join(', ') + '. Check instrument coverage and interval access.');
@@ -315,26 +394,33 @@ async function loadMarket(symbolKey) {
   const now = Date.now();
   const providerDiagnostics = {
     D1: describeSeries(dailyRaw, '1d', now),
-    H1: describeSeries(hourlyRaw, '1h', now),
+    H1Provider: describeSeries(hourlyRaw, '1h', now),
+    H1: describeSeries(usableHourlyRaw, '1h', now),
     M5: describeSeries(usableFiveMinuteRaw, '5m', now),
-    M1: oneMinuteRaw.length ? describeSeries(oneMinuteRaw, '1m', now) : null
+    M1: oneMinuteRaw.length ? describeSeries(oneMinuteRaw, '1m', now) : null,
+    h1Fallback,
+    m5Fallback
   };
   console.info('[market-feed] ' + JSON.stringify({
     symbol: providerSymbol,
     fetchedAt: new Date(now).toISOString(),
     D1: providerDiagnostics.D1,
+    H1Provider: providerDiagnostics.H1Provider,
     H1: providerDiagnostics.H1,
+    h1Fallback,
     M5: providerDiagnostics.M5,
     M1: providerDiagnostics.M1
   }));
   const value = {
     d1: completedOnly(dailyRaw, 24 * 60 * 60 * 1000, now),
-    h1: completedOnly(hourlyRaw, 60 * 60 * 1000, now),
+    h1: completedOnly(usableHourlyRaw, 60 * 60 * 1000, now),
     m5: usableFiveMinuteRaw,
     m5Closed: completedOnly(usableFiveMinuteRaw, 5 * 60 * 1000, now),
+    h1Source: h1Fallback.addedBars ? 'SiftingIO 1h + complete SiftingIO 1m aggregates' : 'SiftingIO 1h',
+    h1Fallback,
     m5Source: m5Fallback.addedBars ? 'SiftingIO 5m + complete SiftingIO 1m aggregates' : 'SiftingIO 5m',
     m5Fallback,
-    barTimes: buildLatestBarTimes(dailyRaw, hourlyRaw, usableFiveMinuteRaw),
+    barTimes: buildLatestBarTimes(dailyRaw, usableHourlyRaw, usableFiveMinuteRaw),
     providerDiagnostics,
     source: PROVIDER,
     providerSymbol,
@@ -423,6 +509,8 @@ const server = http.createServer(async (req, res) => {
       dataFreshness: freshness,
       h1Freshness,
       barTimes: market.barTimes,
+      h1Source: market.h1Source,
+      h1Fallback: market.h1Fallback,
       providerDiagnostics: market.providerDiagnostics,
       candles: market.data || { d1: market.d1.length, h1: market.h1.length, m5: market.m5.length },
       m5Source: market.m5Source,
@@ -451,4 +539,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries };
