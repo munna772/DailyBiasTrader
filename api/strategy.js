@@ -1,6 +1,9 @@
 'use strict';
 
 const H1_CANDLE_MS = 60 * 60 * 1000;
+const M5_CANDLE_MS = 5 * 60 * 1000;
+const FIRST_ENTRY_RECENT_BARS = 2;
+const FIRST_ENTRY_MAX_AGE_MS = 15 * 60 * 1000;
 const DAILY_SWEEP_SCAN_BARS = 260;
 const EQ_LOOKBACK_BARS = 60;
 
@@ -284,6 +287,45 @@ function findHourlySweep(rawBars, side, afterTime, now = Date.now()) {
   return null;
 }
 
+function validateActiveHourlySweep(rawBars, side, afterTime, activeH1, now = Date.now()) {
+  if (!activeH1 || typeof activeH1 !== 'object') return null;
+  const expectedBias = side === 'bullish' ? 'BULLISH' : 'BEARISH';
+  if (String(activeH1.bias || '').toUpperCase() !== expectedBias) return null;
+  if (Number(activeH1.d1ConfirmationTime) !== Number(afterTime)) return null;
+
+  const candleTime = Number(activeH1.candleTime);
+  const closeTime = candleTime + H1_CANDLE_MS;
+  if (!Number.isFinite(candleTime) || candleTime <= 0 ||
+      Number(activeH1.closeTime) !== closeTime || closeTime <= Number(afterTime)) return null;
+
+  const bars = normalizeCandles(rawBars)
+    .filter(candle => candle.time + H1_CANDLE_MS <= Number(now));
+  const index = bars.findIndex(candle => candle.time === candleTime);
+  if (index < 1) return null;
+
+  const current = bars[index];
+  const previous = bars[index - 1];
+  if (Number(activeH1.referenceCandleTime) !== previous.time) return null;
+
+  if (side === 'bullish') {
+    const level = previous.low;
+    if (!(current.low < level && current.close > level)) return null;
+    return {
+      side, level, time: closeTime, candleTime: current.time,
+      candle: current, referenceCandleTime: previous.time,
+      referenceCandle: previous, lookbackBars: 1, persisted: true
+    };
+  }
+
+  const level = previous.high;
+  if (!(current.high > level && current.close < level)) return null;
+  return {
+    side, level, time: closeTime, candleTime: current.time,
+    candle: current, referenceCandleTime: previous.time,
+    referenceCandle: previous, lookbackBars: 1, persisted: true
+  };
+}
+
 function calculateFib(sweep, side) {
   const high = sweep.high, low = sweep.low, distance = high - low;
   if (!(distance > 0)) throw new Error('Cannot calculate Fibonacci levels from a zero-range candle');
@@ -298,13 +340,42 @@ function calculateFib(sweep, side) {
 
 function candleTouches(candle, price) { return candle.low <= price && candle.high >= price; }
 
-function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars) {
+function findM5Entries(rawBars, side, sweepTime, fib, rawClosedBars = rawBars, evaluationTime = null) {
   const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
   const closedBars = normalizeCandles(rawClosedBars).filter(c => c.time >= sweepTime);
   const entries = [];
-  const first = bars.length ? bars[bars.length - 1] : null;
+  let first = null;
 
-  if (first && candleTouches(first, fib['0.5'])) {
+  // SiftingIO may deliver only completed 5-minute candles. Checking the last two
+  // bars prevents a brief Fib 0.5 touch from disappearing between refreshes.
+  // A previous touch is not shown again after a later bar has already hit SL or TP.
+  const firstSearchStart = Math.max(0, bars.length - FIRST_ENTRY_RECENT_BARS);
+  for (let index = bars.length - 1; index >= firstSearchStart; index -= 1) {
+    const candidate = bars[index];
+    if (!candleTouches(candidate, fib['0.5'])) continue;
+
+    if (evaluationTime !== null && evaluationTime !== undefined && Number.isFinite(Number(evaluationTime))) {
+      const ageSinceClose = Number(evaluationTime) - (candidate.time + M5_CANDLE_MS);
+      if (ageSinceClose > FIRST_ENTRY_MAX_AGE_MS || ageSinceClose < -M5_CANDLE_MS) continue;
+    }
+
+    const laterBars = bars.slice(index + 1);
+    const alreadyResolved = laterBars.some(candle => {
+      const stopHit = side === 'bullish'
+        ? candle.low <= fib['0.618']
+        : candle.high >= fib['0.618'];
+      const targetHit = side === 'bullish'
+        ? candle.high >= fib['0']
+        : candle.low <= fib['0'];
+      return stopHit || targetHit;
+    });
+    if (!alreadyResolved) {
+      first = candidate;
+      break;
+    }
+  }
+
+  if (first) {
     const entry = fib['0.5'];
     const stop = fib['0.618'];
     const takeProfit = fib['0'];
@@ -534,7 +605,15 @@ function analyzeStrategy(input) {
       manualH1Reference: 'Latest completed H1 candle immediately before current evaluation'
     };
   } else {
-    h1Sweep = findHourlySweep(h1, side, daily.confirmation.time, evaluationTime);
+    const newestH1Sweep = findHourlySweep(h1, side, daily.confirmation.time, evaluationTime);
+    const retainedH1Sweep = newestH1Sweep
+      ? null
+      : validateActiveHourlySweep(h1, side, daily.confirmation.time, input.activeH1, evaluationTime);
+    h1Sweep = newestH1Sweep || retainedH1Sweep;
+    h1Metadata = {
+      h1Mode: 'AUTO',
+      h1ConfirmationSource: retainedH1Sweep ? 'PERSISTED' : 'LATEST_COMPLETED_CANDLE'
+    };
     if (!h1Sweep) {
       const h1SearchAfter = daily.confirmation.time;
       const latestCandidate = completedH1[completedH1.length - 1] || null;
@@ -563,7 +642,7 @@ function analyzeStrategy(input) {
     }
   }
   const fib = calculateFib(h1Sweep.candle, side);
-  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5);
+  const entries = findM5Entries(m5, side, h1Sweep.time, fib, input.m5Closed || input.m5, evaluationTime);
   const blockedEntries = entries.filter(entry => !entry.setupValid);
   const blocked = blockedEntries.length > 0;
   const riskIssues = [];
@@ -587,7 +666,7 @@ function analyzeStrategy(input) {
       lookbackBars: h1Sweep.lookbackBars,
       ...(h1Sweep.manual
         ? { manual: true, referenceCandleTime: h1Sweep.candleTime }
-        : { referenceCandleTime: h1Sweep.referenceCandleTime })
+        : { referenceCandleTime: h1Sweep.referenceCandleTime, persisted: Boolean(h1Sweep.persisted) })
     },
     fib, entries,
     riskWarning: blocked
@@ -599,7 +678,7 @@ function analyzeStrategy(input) {
 
 module.exports = {
   normalizeCandles, buildDailyLevels, findSweep, dailyConfirmation, findDailyBias,
-  findHourlySweep, calculateFib, candleTouches, findM5Entries, findHistoricalM5Entries, analyzeStrategy,
+  findHourlySweep, validateActiveHourlySweep, calculateFib, candleTouches, findM5Entries, findHistoricalM5Entries, analyzeStrategy,
   isInsideThreeBullish, isInsideThreeBearish,
   assessMarketDataFreshness, gateStrategyOnFreshness
 };
