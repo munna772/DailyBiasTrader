@@ -210,6 +210,42 @@ function loadManualH1Bias(){
   return null;
 }
 let manualH1Bias = loadManualH1Bias();
+const AUTO_H1_CONFIRMATION_KEY = 'dailybiastrader_auto_h1_confirmation_v1';
+function loadActiveAutoH1Sweep(){
+  try{
+    const raw = localStorage.getItem(AUTO_H1_CONFIRMATION_KEY);
+    if(!raw) return null;
+    const saved = JSON.parse(raw);
+    const values = saved && [
+      saved.d1ConfirmationTime,saved.candleTime,saved.closeTime,saved.referenceCandleTime
+    ].map(Number);
+    if(saved && ['BULLISH','BEARISH'].includes(saved.bias) &&
+       values.every(value => Number.isFinite(value) && value > 0) &&
+       Number(saved.closeTime) === Number(saved.candleTime) + 60 * 60 * 1000){
+      return {
+        bias:saved.bias,
+        d1ConfirmationTime:Number(saved.d1ConfirmationTime),
+        candleTime:Number(saved.candleTime),
+        closeTime:Number(saved.closeTime),
+        referenceCandleTime:Number(saved.referenceCandleTime)
+      };
+    }
+  }catch(error){}
+  return null;
+}
+function saveActiveAutoH1Sweep(value){
+  try{
+    localStorage.setItem(AUTO_H1_CONFIRMATION_KEY,JSON.stringify(value));
+    return true;
+  }catch(error){
+    return false;
+  }
+}
+function clearActiveAutoH1Sweep(){
+  activeAutoH1Sweep = null;
+  try{ localStorage.removeItem(AUTO_H1_CONFIRMATION_KEY); }catch(error){}
+}
+let activeAutoH1Sweep = loadActiveAutoH1Sweep();
 let tradeStorageAvailable = true;
 let tradeLedger = loadTradeLedger();
 
@@ -549,6 +585,8 @@ async function refreshStrategy(){
     if(manualH1Bias){
       strategyUrl += '&manualH1Bias=' + encodeURIComponent(manualH1Bias.bias) +
         '&manualH1BiasSince=' + encodeURIComponent(String(manualH1Bias.since));
+    }else if(activeAutoH1Sweep){
+      strategyUrl += '&activeH1=' + encodeURIComponent(JSON.stringify(activeAutoH1Sweep));
     }
     const response = await fetch(strategyUrl, {
       method:'GET', cache:'no-store', headers:{Accept:'application/json'}, signal:requestController ? requestController.signal : undefined
@@ -559,6 +597,32 @@ async function refreshStrategy(){
       throw new Error(error);
     }
     const s = payload.strategy || {};
+    const d1ConfirmationTime = Number(s.daily && s.daily.confirmation && s.daily.confirmation.time || 0);
+    if(manualH1Bias || s.h1Mode === 'MANUAL'){
+      clearActiveAutoH1Sweep();
+    }else if(['BULLISH','BEARISH'].includes(s.bias) && s.h1Status === 'CONFIRMED' &&
+             s.h1Sweep && !s.h1Sweep.manual && s.h1Sweep.candle){
+      const captured = {
+        bias:s.bias,
+        d1ConfirmationTime,
+        candleTime:Number(s.h1Sweep.candle.time),
+        closeTime:Number(s.h1Sweep.time),
+        referenceCandleTime:Number(s.h1Sweep.referenceCandleTime)
+      };
+      const validCapture = d1ConfirmationTime > 0 &&
+        [captured.candleTime,captured.closeTime,captured.referenceCandleTime].every(value => Number.isFinite(value) && value > 0) &&
+        captured.closeTime === captured.candleTime + 60 * 60 * 1000;
+      if(validCapture){
+        activeAutoH1Sweep = captured;
+        saveActiveAutoH1Sweep(captured);
+      }
+    }else if(activeAutoH1Sweep){
+      const sameD1Sequence = activeAutoH1Sweep.bias === s.bias &&
+        activeAutoH1Sweep.d1ConfirmationTime === d1ConfirmationTime;
+      // The API has revalidated the stored candle on this successful response.
+      // If confirmation is no longer valid, clear the client copy rather than reviving it later.
+      if(!sameD1Sequence || s.h1Status !== 'CONFIRMED') clearActiveAutoH1Sweep();
+    }
     const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null };
     const h1Freshness = payload.h1Freshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null, latestCandleCloseAt: null };
     latestBarTimes = payload.barTimes || null;
@@ -631,9 +695,10 @@ async function refreshStrategy(){
       el('h1Detail').textContent = s.h1Reason || 'No completed H1 candle is available to anchor Fibonacci.';
     } else {
       el('h1Detail').textContent = s.h1Sweep
-        ? 'Latest completed H1 candle opened at ' + formatTime(s.h1Sweep.candle && s.h1Sweep.candle.time) +
+        ? 'H1 sweep candle opened at ' + formatTime(s.h1Sweep.candle && s.h1Sweep.candle.time) +
           ' swept the immediately previous completed H1 candle opened at ' + formatTime(s.h1Sweep.referenceCandleTime) +
-          '. The sweep candle closed at ' + formatTime(s.h1Sweep.time) + '.'
+          '. The sweep candle closed at ' + formatTime(s.h1Sweep.time) + '.' +
+          (s.h1Sweep.persisted ? ' This earlier confirmed sweep is retained while M5 continues monitoring under the same D1 confirmation.' : '')
         : (isManualBias || s.h1Status === 'WAITING_FOR_H1_SWEEP')
           ? s.h1CandidateTime && s.h1ReferenceTime
             ? 'Latest completed H1 candle opened at ' + formatTime(s.h1CandidateTime) +
