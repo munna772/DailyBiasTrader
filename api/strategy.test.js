@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries } = require('./server');
+const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -39,6 +39,8 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('AUTO_H1_CONFIRMATION_KEY'));
   assert.ok(browserUi.includes('activeH1='));
   assert.ok(browserUi.includes('saveActiveAutoH1Sweep'));
+  assert.ok(browserUi.includes('const ledgerEntries ='));
+  assert.ok(browserUi.includes('.concat(Array.isArray(s.entries) ? s.entries : [])'));
   assert.ok(browserUi.includes('class="chart-stage"'));
   assert.ok(browserUi.includes('class="bar-countdown-overlay is-paused"'));
   assert.ok(browserUi.indexOf('id="barCountdown"') > browserUi.indexOf('id="tv_chart"'));
@@ -860,6 +862,16 @@ test('freshness state gates H1 and M5 UI statuses in both UIs', () => {
     assert.ok(manualBranchText.includes('M5 entries are PAUSED until fresh H1 data is available'));
     assert.ok(source.includes('Entries are not evaluated until fresh H1 data is available.') || source.includes('Entry conditions are not evaluated until fresh H1 data is available.'));
   }
+});
+
+test('historical entry events are suppressed unless both M5 and H1 feeds are fresh', () => {
+  const freshM5 = { status: 'FRESH', stale: false };
+  const freshH1 = { status: 'FRESH', stale: false };
+  assert.equal(marketDataFreshForEntries(freshM5, freshH1), true);
+  assert.equal(marketDataFreshForEntries(freshM5, { status: 'STALE', stale: true }), false);
+  assert.equal(marketDataFreshForEntries({ status: 'STALE', stale: true }, freshH1), false);
+  assert.equal(marketDataFreshForEntries(null, freshH1), false);
+  assert.equal(marketDataFreshForEntries(freshM5, null), false);
 });
 
 test('SiftingIO history requests fetch a wide enough window and newest bars first', () => {
