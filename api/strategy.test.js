@@ -33,7 +33,7 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
   assert.ok(browserUi.includes('latest completed M5 candle closed at'));
-  assert.ok(browserUi.includes('whose candle closes after '));
+  assert.ok(browserUi.includes('completed H1 candles that close after this time'));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('AUTO_H1_CONFIRMATION_KEY'));
