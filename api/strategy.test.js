@@ -25,7 +25,7 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('id="manualH1Bias"'));
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
-  assert.ok(browserUi.includes('Manual H1 confirmation applied'));
+  assert.ok(browserUi.includes('H1 confirmation applied at'));
   assert.ok(browserUi.includes('Fibonacci rolls forward to the latest completed H1 candle'));
   assert.ok(browserUi.includes('immediately previous completed H1 candle'));
   assert.ok(browserUi.includes('older M5 candles are ignored'));
