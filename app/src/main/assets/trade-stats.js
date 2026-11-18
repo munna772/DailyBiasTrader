@@ -40,7 +40,7 @@
     for (const entry of Array.isArray(entries) ? entries : []) {
       if (!entry || entry.setupValid !== true) continue;
       if (!['BUY', 'SELL'].includes(entry.direction)) continue;
-      if (!['FIRST_ENTRY', 'SECOND_ENTRY'].includes(entry.type)) continue;
+      if (entry.type !== 'FIRST_ENTRY') continue;
       const entryTime = Number(entry.time);
       const entryPrice = Number(entry.entry);
       const stopLoss = Number(entry.stopLoss);

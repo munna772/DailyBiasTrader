@@ -389,7 +389,6 @@ async function loadMarket(symbolKey) {
   }
 
   const incomplete = [];
-  if (dailyRaw.length < 8) incomplete.push('D1=' + dailyRaw.length + ' (need at least 8)');
   if (usableHourlyRaw.length < 2) incomplete.push('H1=' + usableHourlyRaw.length + ' (need at least 2)');
   if (usableFiveMinuteRaw.length < 10) incomplete.push('M5=' + usableFiveMinuteRaw.length + ' (need at least 10)');
   if (incomplete.length) {
@@ -477,7 +476,7 @@ const server = http.createServer(async (req, res) => {
     }
     const requestedSince = Number(url.searchParams.get('manualBiasSince'));
     if (!Number.isFinite(requestedSince) || requestedSince <= 0 || requestedSince > Date.now() + 5 * 60 * 1000) {
-      return send(res, 400, { error: 'A valid manualBiasSince timestamp is required. Reapply the manual D1 bias.' });
+      return send(res, 400, { error: 'A valid manualBiasSince timestamp is required. Reapply your daily-bias selection.' });
     }
     manualBias = manualBiasParam;
     manualBiasSince = requestedSince;

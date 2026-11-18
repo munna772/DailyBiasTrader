@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { calculateFib, candleTouches, findHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, analyzeStrategy, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries } = require('./server');
@@ -12,7 +12,7 @@ function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
 }
 
-test('browser UI and Android APK UI stay identical and expose manual D1 bias and bar countdown', () => {
+test('browser and Android UI stay identical, use manual daily bias, and preserve H1 controls', () => {
   const browserUi = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   const androidUi = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/index.html'), 'utf8');
   assert.equal(androidUi, browserUi);
@@ -22,6 +22,8 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('MANUAL BULLISH'));
   assert.ok(browserUi.includes('MANUAL BEARISH'));
   assert.ok(browserUi.includes('MANUAL_D1_BIAS_KEY'));
+  assert.ok(browserUi.includes('does not scan D1 liquidity levels, sweeps, candlestick patterns, or confirmation rules'));
+  assert.doesNotMatch(browserUi, /D1 sweeps:|D1 confirmation accepts|SECOND_ENTRY|SECOND ENTRY|second-entry setup/i);
   assert.ok(browserUi.includes('id="manualH1Bias"'));
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
@@ -89,16 +91,18 @@ test('browser and Android trade statistics modules stay identical', () => {
   assert.equal(androidStats, browserStats);
 });
 
-test('trade ledger records only valid setups and deduplicates repeated signals', () => {
+test('trade ledger records only valid first entries and deduplicates repeated signals', () => {
+  const first = { type: 'FIRST_ENTRY', direction: 'SELL', time: 1000, entry: 100, stopLoss: 100.3, takeProfit: 99, setupValid: true };
   const entries = [
-    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 100, stopLoss: 100.3, takeProfit: 99, setupValid: true },
-    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 100, stopLoss: 100.3, takeProfit: 99, setupValid: true },
-    { type: 'SECOND_ENTRY', direction: 'BUY', time: 2000, entry: 100, stopLoss: 101, takeProfit: 102, setupValid: false }
+    first, { ...first },
+    { type: 'SECOND_ENTRY', direction: 'BUY', time: 2000, entry: 100, stopLoss: 101, takeProfit: 102, setupValid: true },
+    { type: 'FIRST_ENTRY', direction: 'BUY', time: 3000, entry: 100, stopLoss: 101, takeProfit: 102, setupValid: false }
   ];
   const once = addSignalTrades([], 'XAUUSD', entries, 5000);
   const twice = addSignalTrades(once, 'XAUUSD', entries, 6000);
   assert.equal(once.length, 1);
   assert.equal(twice.length, 1);
+  assert.equal(once[0].type, 'FIRST_ENTRY');
   assert.equal(once[0].pipSize, 0.10);
   assert.equal(once[0].status, 'OPEN');
 });
@@ -133,9 +137,9 @@ test('BUY trade is counted as TP only on a candle after the entry candle', () =>
   assert.equal(resolved[0].pipsLost, 0);
 });
 
-test('Gold SELL trade counts stop-loss pips using the Gold pip size', () => {
+test('Gold SELL first entry counts stop-loss pips using the Gold pip size', () => {
   const trade = addSignalTrades([], 'XAUUSD', [
-    { type: 'SECOND_ENTRY', direction: 'SELL', time: 1000, entry: 25, stopLoss: 25.5, takeProfit: 24.5, setupValid: true }
+    { type: 'FIRST_ENTRY', direction: 'SELL', time: 1000, entry: 25, stopLoss: 25.5, takeProfit: 24.5, setupValid: true }
   ], 5000);
   const resolved = resolveTrades(trade, 'XAUUSD', [
     { time: 301000, high: 25.6, low: 24.9 }
@@ -160,7 +164,7 @@ test('ambiguous Gold candle touching both TP and SL is conservatively counted as
 test('trade summary counts TP, SL, open trades and net pips per selected market', () => {
   const entries = [
     { type: 'FIRST_ENTRY', direction: 'BUY', time: 1000, entry: 100, stopLoss: 99.8, takeProfit: 101.2, setupValid: true },
-    { type: 'SECOND_ENTRY', direction: 'SELL', time: 2000, entry: 100, stopLoss: 100.2, takeProfit: 99, setupValid: true }
+    { type: 'FIRST_ENTRY', direction: 'SELL', time: 2000, entry: 100, stopLoss: 100.2, takeProfit: 99, setupValid: true }
   ];
   let ledger = addSignalTrades([], 'XAUUSD', entries, 5000);
   ledger = resolveTrades(ledger, 'XAUUSD', [
@@ -181,7 +185,7 @@ test('trade summary counts TP, SL, open trades and net pips per selected market'
   assert.equal(summarizeTrades(ledger, 'USOIL').total, 0);
 });
 
-test('historical M5 replay reuses the strategy first and second entry rules', () => {
+test('historical M5 replay contains first entries only', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const bars = [
     c('2026-11-10T05:00:00', 111, 111, 109, 110.5),
@@ -190,33 +194,7 @@ test('historical M5 replay reuses the strategy first and second entry rules', ()
   ];
   const entries = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib);
   assert.equal(entries.filter(entry => entry.type === 'FIRST_ENTRY').length, 1);
-  assert.equal(entries.filter(entry => entry.type === 'SECOND_ENTRY').length, 1);
-  assert.equal(entries.find(entry => entry.type === 'SECOND_ENTRY').entry, 112);
-  assert.equal(entries.find(entry => entry.type === 'SECOND_ENTRY').stopLoss, 113);
-});
-
-test('historical Gold second entries still obey the 4-pip stop cap', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
-  const bars = [c('2026-11-10T05:10:00', 112.5, 113, 111, 112)];
-  const gold = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib)
-    .find(entry => entry.type === 'SECOND_ENTRY');
-  assert.ok(gold);
-  assert.equal(gold.setupValid, false);
-  assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
-});
-
-test('recognizes a low-level rejection as a bullish liquidity sweep', () => {
-  const result = findSweep(c('2026-11-10T00:00:00', 102, 108, 95, 105), { lows: [{ price: 100, name: 'PDL' }], highs: [] });
-  assert.equal(result.bullish.levelName, 'PDL');
-  assert.equal(result.bullish.level, 100);
-  assert.equal(result.bearish, null);
-});
-
-test('recognizes a high-level rejection as a bearish liquidity sweep', () => {
-  const result = findSweep(c('2026-11-10T00:00:00', 98, 105, 90, 94), { lows: [], highs: [{ price: 100, name: 'PDH' }] });
-  assert.equal(result.bearish.levelName, 'PDH');
-  assert.equal(result.bearish.level, 100);
-  assert.equal(result.bullish, null);
+  assert.equal(entries.some(entry => entry.type === 'SECOND_ENTRY'), false);
 });
 
 test('maps bullish and bearish Fibonacci anchors in the requested direction', () => {
@@ -251,52 +229,7 @@ test('H1 confirmation uses the immediately previous completed candle as its swee
   assert.equal(result.time, bars[3].time + 60 * 60 * 1000);
 });
 
-test('BUY second entry uses sweep candle close, wick-low stop, and Fib 0 target', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107.7, 109, 107.63, 108)];
-  const entries = findM5Entries(bars, 'bullish', bars[0].time, fib);
-  const second = entries.find(e => e.type === 'SECOND_ENTRY');
-  assert.ok(second);
-  assert.equal(second.entry, 108);
-  assert.equal(second.stopLoss, 107.63);
-  assert.equal(second.takeProfit, 120);
-  assert.equal(second.stopValid, true);
-  assert.equal(second.status, 'SETUP_DETECTED');
-});
-
-test('SELL second entry uses sweep candle close, wick-high stop, and Fib 0 target', () => {
-  const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
-  const bars = [c('2026-11-10T05:00:00', 112.3, 112.39, 111, 112)];
-  const entries = findM5Entries(bars, 'bearish', bars[0].time, fib);
-  const second = entries.find(e => e.type === 'SECOND_ENTRY');
-  assert.ok(second);
-  assert.equal(second.entry, 112);
-  assert.equal(second.stopLoss, 112.39);
-  assert.equal(second.takeProfit, 100);
-  assert.equal(second.stopValid, true);
-  assert.equal(second.status, 'SETUP_DETECTED');
-});
-
-test('Gold-only second-entry strategy always enforces the 4-pip ($0.40) stop cap', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107.8, 108.2, 107.2, 108)];
-  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars).find(e => e.type === 'SECOND_ENTRY');
-  assert.ok(Math.abs(gold.stopDistance - 0.8) < 1e-9);
-  assert.equal(gold.maxStopDistance, 0.4);
-  assert.equal(gold.stopValid, false);
-  assert.equal(gold.status, 'BLOCKED_STOP_TOO_WIDE');
-});
-
-test('Gold second-entry stop at or below $0.40 is allowed', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 107.8, 108.1, 107.63, 108.03)];
-  const gold = findM5Entries(bars, 'bullish', bars[0].time, fib, bars).find(e => e.type === 'SECOND_ENTRY');
-  assert.ok(gold);
-  assert.ok(Math.abs(gold.stopDistance - 0.4) < 1e-9);
-  assert.equal(gold.stopValid, true);
-});
-
-test('manual bullish D1 bias bypasses D1 scan and starts H1 search at selection time', () => {
+test('manual bullish daily bias starts H1 search at selection time without D1 analysis', () => {
   const h1 = [
     c('2026-11-10T05:00:00', 102, 104, 100, 102),
     c('2026-11-10T06:00:00', 102, 103, 101, 102),
@@ -316,7 +249,7 @@ test('manual bullish D1 bias bypasses D1 scan and starts H1 search at selection 
   assert.equal(result.entryStatus, 'WAITING_FOR_M5');
 });
 
-test('manual bearish D1 bias searches only matching H1 sweeps after selection', () => {
+test('manual bearish daily bias searches only matching H1 sweeps after selection', () => {
   const h1 = [
     c('2026-11-10T05:00:00', 102, 105, 100, 102),
     c('2026-11-10T06:00:00', 102, 104, 101, 102),
@@ -397,10 +330,14 @@ test('manual bias ignores an H1 sweep that occurred before the user selected it'
   assert.equal(result.h1Sweep, undefined);
 });
 
-test('invalid or incomplete manual bias metadata falls back to automatic D1 analysis', () => {
-  const result = analyzeStrategy({d1: [],h1: [],m5: [],manualBias:'BULLISH'});
+test('manual daily bias is required and invalid metadata never activates automatic D1 analysis', () => {
+  const d1 = [c('2026-11-10T00:00:00', 100, 110, 90, 105)];
+  const result = analyzeStrategy({d1,h1:[],m5:[],manualBias:'BULLISH'});
   assert.equal(result.bias, 'WAITING');
-  assert.equal(result.biasMode, 'AUTO');
+  assert.equal(result.biasMode, 'UNSET');
+  assert.equal(result.h1Status, 'WAITING_FOR_DAILY_BIAS');
+  assert.equal(result.d1Sweep, undefined);
+  assert.equal(result.daily, undefined);
 });
 
 test('manual H1 confirmation uses the latest completed H1 candle as its Fib anchor and starts M5 after selection', () => {
@@ -465,7 +402,7 @@ test('manual H1 reference rolls forward to the latest completed candle instead o
   assert.equal(result.entries.some(entry => entry.time === oldM5.time), false);
 });
 
-test('manual H1 confirmation refuses a direction that conflicts with D1', () => {
+test('manual H1 confirmation refuses a direction that conflicts with the selected daily bias', () => {
   const h1 = [c('2026-11-16T09:00:00', 103, 106, 102, 105)];
   const result = analyzeStrategy({
     d1: [], h1, m5: [],
@@ -496,63 +433,13 @@ test('manual H1 confirmation requires a completed reference candle', () => {
   assert.equal(result.entries.length, 0);
 });
 
-test('D1 confirmation must occur after the liquidity-sweep candle', () => {
-  const bars = [];
-  for (let day = 1; day <= 7; day++) {
-    bars.push(c('2026-11-' + String(day).padStart(2, '0') + 'T00:00:00', 105, 110, 100, 106));
-  }
-  // This candle sweeps below the prior low and closes above the prior high.
-  // It must not confirm its own sweep; a later D1 candle is required.
-  bars.push(c('2026-11-08T00:00:00', 118, 120, 95, 115));
-  assert.equal(findDailyBias(bars).bias, 'WAITING');
-
-  bars.push(c('2026-11-09T00:00:00', 112, 123, 111, 122));
-  assert.equal(findDailyBias(bars).bias, 'BULLISH');
-});
-
-test('second entry is blocked when Fib 0 target is already behind the entry', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const bars = [c('2026-11-10T05:00:00', 121, 130, 106, 125)];
-  const second = findM5Entries(bars, 'bullish', bars[0].time, fib)
-    .find(entry => entry.type === 'SECOND_ENTRY');
-  assert.ok(second);
-  assert.equal(second.stopSideValid, true);
-  assert.equal(second.takeProfitValid, false);
-  assert.equal(second.setupValid, false);
-  assert.equal(second.status, 'BLOCKED_INVALID_TARGET_SIDE');
-});
-
-test('recognizes the three-candle inside pattern in both directions', () => {
-  const bullish = [
-    c('2026-11-10T00:00:00', 10, 15, 9, 14),
-    c('2026-11-11T00:00:00', 14, 14.5, 10, 11),
-    c('2026-11-12T00:00:00', 11, 14, 10, 13)
-  ];
-  const bearish = [
-    c('2026-11-10T00:00:00', 14, 15, 9, 10),
-    c('2026-11-11T00:00:00', 11, 14, 10, 13),
-    c('2026-11-12T00:00:00', 13, 14, 10, 11)
-  ];
-  assert.equal(isInsideThreeBullish(bullish, 2), true);
-  assert.equal(isInsideThreeBearish(bearish, 2), true);
-});
-
-
 test('first M5 entry may trigger on the current intrabar candle', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T05:00:00', 109, 111, 108, 109);
-  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
+  const entries = findM5Entries([current], 'bullish', current.time, fib);
   assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), true);
   assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
 });
-
-test('second M5 entry requires a completed sweep-and-close candle', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const current = c('2026-11-10T05:00:00', 113, 115, 111, 113);
-  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
-  assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
-});
-
 
 test('AUTO H1 accepts only a previously captured and revalidated anchor after its H1 closes', () => {
   const start = Date.parse('2026-11-16T08:00:00Z');
@@ -560,7 +447,7 @@ test('AUTO H1 accepts only a previously captured and revalidated anchor after it
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const active = {
-    bias: 'BULLISH', d1ConfirmationTime: start - 3600000,
+    bias: 'BULLISH', biasSelectedAt: start - 3600000,
     candleTime: sweep.time, closeTime: sweep.time + 3600000,
     referenceCandleTime: previous.time
   };
@@ -608,27 +495,27 @@ test('persisted AUTO H1 confirmation remains active after a newer H1 candle clos
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const bars = [previous, sweep, newer];
-  const d1ConfirmationTime = start - 3600000;
+  const biasSelectedAt = start - 3600000;
   const active = {
-    bias: 'BULLISH', d1ConfirmationTime, candleTime: sweep.time,
+    bias: 'BULLISH', biasSelectedAt, candleTime: sweep.time,
     closeTime: sweep.time + 3600000, referenceCandleTime: previous.time
   };
-  assert.equal(findHourlySweep(bars, 'bullish', d1ConfirmationTime, start + 3 * 3600000), null);
-  const retained = validateActiveHourlySweep(bars, 'bullish', d1ConfirmationTime, active, start + 3 * 3600000);
+  assert.equal(findHourlySweep(bars, 'bullish', biasSelectedAt, start + 3 * 3600000), null);
+  const retained = validateActiveHourlySweep(bars, 'bullish', biasSelectedAt, active, start + 3 * 3600000);
   assert.ok(retained);
   assert.equal(retained.persisted, true);
   assert.equal(retained.candle.time, sweep.time);
   assert.equal(retained.referenceCandleTime, previous.time);
 });
 
-test('persisted AUTO H1 confirmation is rejected when its D1 key or candle details do not match', () => {
+test('persisted AUTO H1 confirmation is rejected when its daily-bias key or candle details do not match', () => {
   const start = Date.parse('2026-11-16T08:00:00Z');
   const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const bars = [previous, sweep, newer];
   const active = {
-    bias: 'BULLISH', d1ConfirmationTime: start - 3600000,
+    bias: 'BULLISH', biasSelectedAt: start - 3600000,
     candleTime: sweep.time, closeTime: sweep.time + 3600000,
     referenceCandleTime: previous.time
   };
@@ -651,7 +538,7 @@ test('first M5 entry retains a recent Fib 0.5 touch for one following candle', (
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const oldTouch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
-  const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, [], Date.parse('2026-11-10T05:10:30Z'));
+  const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, Date.parse('2026-11-10T05:10:30Z'));
   const first = entries.find(entry => entry.type === 'FIRST_ENTRY');
   assert.ok(first);
   assert.equal(first.time, oldTouch.time);
@@ -663,7 +550,7 @@ test('first M5 entry is not re-signalled after a later candle already hits SL or
   const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const resolved = c('2026-11-10T05:05:00', 112, 121, 111, 119);
   const latest = c('2026-11-10T05:10:00', 114, 115, 113, 114);
-  const entries = findM5Entries([touch, resolved, latest], 'bullish', touch.time, fib, [], Date.parse('2026-11-10T05:15:00Z'));
+  const entries = findM5Entries([touch, resolved, latest], 'bullish', touch.time, fib, Date.parse('2026-11-10T05:15:00Z'));
   assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
 });
 
@@ -671,50 +558,21 @@ test('first M5 entry recent-bar fallback rejects a touch older than the live fre
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
-  const entries = findM5Entries([touch, latest], 'bullish', touch.time, fib, [], Date.parse('2026-11-10T05:30:00Z'));
+  const entries = findM5Entries([touch, latest], 'bullish', touch.time, fib, Date.parse('2026-11-10T05:30:00Z'));
   assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
 });
 
-test('second M5 entry reports the latest completed candle only', () => {
+test('M5 strategy ignores a removed 0.618 sweep-and-close pattern', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const older = c('2026-11-10T05:00:00', 113, 115, 111, 113);
-  const newer = c('2026-11-10T05:05:00', 108, 116, 106, 109);
-  const entries = findM5Entries([older, newer], 'bullish', older.time, fib, [older, newer]);
-  const second = entries.find(e => e.type === 'SECOND_ENTRY');
-  assert.ok(second);
-  assert.equal(second.time, newer.time);
-});
-
-
-test('second M5 entry does not replay an old sweep after a newer completed candle', () => {
-  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const oldSweep = c('2026-11-10T05:00:00', 108, 116, 106, 109);
-  const latestClosed = c('2026-11-10T05:05:00', 109, 112, 108, 111);
-  const entries = findM5Entries([oldSweep, latestClosed], 'bullish', oldSweep.time, fib, [oldSweep, latestClosed]);
-  assert.equal(entries.some(e => e.type === 'SECOND_ENTRY'), false);
-});
-
-test('three-candle D1 inside pattern must form entirely after the liquidity sweep', () => {
-  const sweepAsFirst = [
-    c('2026-11-10T00:00:00', 10, 15, 9, 14),
-    c('2026-11-11T00:00:00', 14, 14.5, 10, 11),
-    c('2026-11-12T00:00:00', 11, 14, 10, 13)
-  ];
-  assert.equal(dailyConfirmation(sweepAsFirst, 2, 'bullish', 0), null);
-
-  const formedAfterSweep = [
-    c('2026-11-10T00:00:00', 12, 13, 10, 11),
-    c('2026-11-11T00:00:00', 10, 15, 9, 14),
-    c('2026-11-12T00:00:00', 14, 14.5, 10, 11),
-    c('2026-11-13T00:00:00', 11, 14, 10, 13)
-  ];
-  assert.equal(dailyConfirmation(formedAfterSweep, 3, 'bullish', 0), 'Bullish 3-candle inside-bar pattern');
+  const sweepOnly = c('2026-11-10T05:00:00', 107.7, 109, 107.63, 108);
+  const entries = findM5Entries([sweepOnly], 'bullish', sweepOnly.time, fib);
+  assert.deepEqual(entries, []);
 });
 
 test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const current = c('2026-11-10T06:00:00', 109, 111, 108, 109);
-  const entries = findM5Entries([current], 'bullish', current.time, fib, []);
+  const entries = findM5Entries([current], 'bullish', current.time, fib);
   const first = entries.find(e => e.type === 'FIRST_ENTRY');
   assert.ok(first);
   assert.equal(first.stopLoss, 107.64);
@@ -725,7 +583,7 @@ test('first BUY entry uses 0.618 below entry as stop and 0 as target', () => {
 test('first SELL entry uses 0.618 above entry as stop and 0 as target', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const current = c('2026-11-10T06:00:00', 111, 112, 109, 111);
-  const entries = findM5Entries([current], 'bearish', current.time, fib, []);
+  const entries = findM5Entries([current], 'bearish', current.time, fib);
   const first = entries.find(e => e.type === 'FIRST_ENTRY');
   assert.ok(first);
   assert.equal(first.stopLoss, 112.36);
@@ -1044,29 +902,3 @@ test('one-minute fallback adds newer M5 bars without overwriting provider M5 can
   assert.equal(assessMarketDataFreshness(merged.bars, start + 600000).stale, false);
 });
 
-test('D1 pending sweep details are retained and distinguish sweep from confirmation', () => {
-  const bars = [];
-  for (let day = 1; day <= 7; day++) {
-    bars.push(c('2026-11-' + String(day).padStart(2, '0') + 'T00:00:00', 105, 110, 100, 106));
-  }
-  bars.push(c('2026-11-08T00:00:00', 118, 120, 95, 115));
-  const result = analyzeStrategy({ d1: bars, h1: [], m5: [] });
-  assert.equal(result.bias, 'WAITING');
-  assert.equal(result.h1Status, 'WAITING_FOR_D1');
-  assert.equal(result.d1Sweep.side, 'bullish');
-  assert.equal(result.d1Sweep.levelName, 'PDL');
-  assert.equal(result.d1Sweep.time, bars[7].time);
-  assert.equal(result.d1BarsAfterSweep, 0);
-  assert.match(result.biasReason, /no confirmation yet/i);
-});
-
-test('D1 waiting UI explains the later completed-candle confirmation rule in both apps', () => {
-  for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
-    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    assert.ok(source.includes('later completed D1 candle must close above the previous D1 high'));
-    assert.ok(source.includes('The sweep candle itself cannot confirm its own sweep.'));
-    assert.ok(source.includes('d1Sweep.levelName'));
-    assert.ok(source.includes('No later completed D1 candle is available yet.'));
-    assert.ok(source.includes("'SWEEP DETECTED'"));
-  }
-});
