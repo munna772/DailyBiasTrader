@@ -4,7 +4,6 @@ const H1_CANDLE_MS = 60 * 60 * 1000;
 const M5_CANDLE_MS = 5 * 60 * 1000;
 const FIRST_ENTRY_RECENT_BARS = 2;
 const FIRST_ENTRY_MAX_AGE_MS = 15 * 60 * 1000;
-D1 constants
 function candleTime(c) {
   const raw = c && c.time;
   if (raw === null || raw === undefined || raw === '') return NaN;
