@@ -475,6 +475,19 @@ const server = http.createServer(async (req, res) => {
     manualBias = manualBiasParam;
     manualBiasSince = requestedSince;
   }
+  let activeH1 = null;
+  const activeH1Param = String(url.searchParams.get('activeH1') || '');
+  if (activeH1Param) {
+    if (activeH1Param.length > 512) {
+      return send(res, 400, { error: 'Stored H1 confirmation data is too large. Refresh the app and try again.' });
+    }
+    try {
+      const candidate = JSON.parse(activeH1Param);
+      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) activeH1 = candidate;
+    } catch (error) {
+      return send(res, 400, { error: 'Stored H1 confirmation data is invalid. Refresh the app to reset it.' });
+    }
+  }
   const manualH1BiasParam = String(url.searchParams.get('manualH1Bias') || '').toUpperCase();
   let manualH1Bias = null;
   let manualH1BiasSince = null;
@@ -494,7 +507,7 @@ const server = http.createServer(async (req, res) => {
     const strategyNow = Date.now();
     const freshness = assessMarketDataFreshness(market.m5, strategyNow);
     const h1Freshness = assessH1DataFreshness(market.h1, strategyNow);
-    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince, now: strategyNow });
+    const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince, activeH1, now: strategyNow });
     const result = gateStrategyOnFreshness(rawStrategy, freshness, h1Freshness);
     const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
