@@ -42,6 +42,10 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.indexOf('id="barCountdown"') < browserUi.indexOf('Chart source: TradingView'));
   assert.ok(browserUi.includes('.bar-countdown-overlay{position:absolute;'));
   assert.ok(browserUi.includes("el('barCountdownState').textContent = 'LIVE'"));
+  assert.ok(browserUi.includes("el('barCountdownState').textContent = 'CLOCK'"));
+  assert.ok(browserUi.includes('counting to the next UTC H1 boundary'));
+  assert.ok(browserUi.includes('Strategy entries remain paused until verified fresh H1 data arrives.'));
+  assert.ok(browserUi.includes('.bar-countdown-overlay.is-clock'));
   assert.ok(browserUi.includes('payload.barTimes'));
   assert.ok(browserUi.includes('latestDataFreshness.stale'));
   assert.ok(browserUi.includes('timestampSource'));
