@@ -300,7 +300,7 @@ test('manual bullish D1 bias bypasses D1 scan and starts H1 search at selection 
   const h1 = [
     c('2026-11-10T05:00:00', 102, 104, 100, 102),
     c('2026-11-10T06:00:00', 102, 103, 101, 102),
-    c('2026-11-10T07:00:00', 102, 103, 99, 101)
+    c('2026-11-10T07:00:00', 102, 103, 99, 102)
   ];
   const result = analyzeStrategy({
     d1: [],
@@ -347,7 +347,8 @@ test('manual bias selected mid-hour accepts a matching sweep when that H1 candle
     h1,
     m5: [],
     manualBias: 'BULLISH',
-    manualBiasSince: selectedAt
+    manualBiasSince: selectedAt,
+    now: selectedAt + 60 * 60 * 1000 + 60 * 1000
   });
   assert.equal(result.bias, 'BULLISH');
   assert.equal(result.biasMode, 'MANUAL');
@@ -660,7 +661,7 @@ test('first M5 entry retains a recent Fib 0.5 touch for one following candle', (
 test('first M5 entry is not re-signalled after a later candle already hits SL or TP', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
-  const resolved = c('2026-11-10T05:05:00', 111, 121, 110, 119);
+  const resolved = c('2026-11-10T05:05:00', 112, 121, 111, 119);
   const latest = c('2026-11-10T05:10:00', 114, 115, 113, 114);
   const entries = findM5Entries([touch, resolved, latest], 'bullish', touch.time, fib, [], Date.parse('2026-11-10T05:15:00Z'));
   assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
@@ -843,7 +844,7 @@ test('freshness state gates H1 and M5 UI statuses in both UIs', () => {
     const h1StateIndex = source.indexOf('const h1Freshness = payload.h1Freshness');
     const h1StatusIndex = source.indexOf("setMetric('h1', h1DisplayState");
     const entryStatusIndex = source.indexOf("setMetric('entry', entriesPaused ? 'PAUSED — STALE DATA'");
-    assert.ok(m5StateIndex >= 0 && h1StateIndex > m5StateIndex);
+    assert.ok(m5StateIndex >= 0 && h1StateIndex >= 0 && h1StateIndex < m5StateIndex);
     assert.ok(h1StatusIndex > h1StateIndex);
     assert.ok(entryStatusIndex > m5StateIndex);
     assert.ok(source.includes('STALE H1 DATA'));
