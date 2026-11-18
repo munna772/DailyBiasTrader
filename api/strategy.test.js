@@ -36,6 +36,12 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
+  assert.ok(browserUi.includes('class="chart-stage"'));
+  assert.ok(browserUi.includes('class="bar-countdown-overlay is-paused"'));
+  assert.ok(browserUi.indexOf('id="barCountdown"') > browserUi.indexOf('id="tv_chart"'));
+  assert.ok(browserUi.indexOf('id="barCountdown"') < browserUi.indexOf('</div>\\n  <div class="sub" style="margin-top:8px">Chart source'));
+  assert.match(browserUi, /\\.bar-countdown-overlay\\{position:absolute;[^}]*z-index:20/);
+  assert.ok(browserUi.includes("el('barCountdownState').textContent = 'LIVE'"));
   assert.ok(browserUi.includes('payload.barTimes'));
   assert.ok(browserUi.includes('latestDataFreshness.stale'));
   assert.ok(browserUi.includes('timestampSource'));
