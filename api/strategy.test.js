@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { findSweep, calculateFib, candleTouches, findHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries } = require('./server');
@@ -36,6 +36,9 @@ test('browser UI and Android APK UI stay identical and expose manual D1 bias and
   assert.ok(browserUi.includes('whose candle closes after '));
   assert.ok(browserUi.includes('h1BarsChecked'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
+  assert.ok(browserUi.includes('AUTO_H1_CONFIRMATION_KEY'));
+  assert.ok(browserUi.includes('activeH1='));
+  assert.ok(browserUi.includes('saveActiveAutoH1Sweep'));
   assert.ok(browserUi.includes('class="chart-stage"'));
   assert.ok(browserUi.includes('class="bar-countdown-overlay is-paused"'));
   assert.ok(browserUi.indexOf('id="barCountdown"') > browserUi.indexOf('id="tv_chart"'));
@@ -548,6 +551,28 @@ test('second M5 entry requires a completed sweep-and-close candle', () => {
 });
 
 
+test('AUTO H1 accepts only a previously captured and revalidated anchor after its H1 closes', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
+  const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
+  const active = {
+    bias: 'BULLISH', d1ConfirmationTime: start - 3600000,
+    candleTime: sweep.time, closeTime: sweep.time + 3600000,
+    referenceCandleTime: previous.time
+  };
+  const result = analyzeStrategy({
+    d1: [], h1: [previous, sweep, newer], m5: [],
+    manualBias: 'BULLISH', manualBiasSince: start - 3600000,
+    activeH1: active, now: start + 3 * 3600000
+  });
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Mode, 'AUTO');
+  assert.equal(result.h1ConfirmationSource, 'PERSISTED');
+  assert.equal(result.h1Sweep.persisted, true);
+  assert.equal(result.h1Sweep.candle.time, sweep.time);
+});
+
 test('AUTO H1 ignores an old historical sweep when the latest completed candle has no sweep', () => {
   const start = Date.parse('2026-10-01T00:00:00Z');
   const bars = [{ time: start, open: 104, high: 106, low: 100, close: 104 }];
@@ -574,6 +599,42 @@ test('AUTO H1 compares the latest candle only with the immediately preceding H1 
   assert.equal(result.lookbackBars, 1);
 });
 
+test('persisted AUTO H1 confirmation remains active after a newer H1 candle closes', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
+  const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
+  const bars = [previous, sweep, newer];
+  const d1ConfirmationTime = start - 3600000;
+  const active = {
+    bias: 'BULLISH', d1ConfirmationTime, candleTime: sweep.time,
+    closeTime: sweep.time + 3600000, referenceCandleTime: previous.time
+  };
+  assert.equal(findHourlySweep(bars, 'bullish', d1ConfirmationTime, start + 3 * 3600000), null);
+  const retained = validateActiveHourlySweep(bars, 'bullish', d1ConfirmationTime, active, start + 3 * 3600000);
+  assert.ok(retained);
+  assert.equal(retained.persisted, true);
+  assert.equal(retained.candle.time, sweep.time);
+  assert.equal(retained.referenceCandleTime, previous.time);
+});
+
+test('persisted AUTO H1 confirmation is rejected when its D1 key or candle details do not match', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
+  const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
+  const bars = [previous, sweep, newer];
+  const active = {
+    bias: 'BULLISH', d1ConfirmationTime: start - 3600000,
+    candleTime: sweep.time, closeTime: sweep.time + 3600000,
+    referenceCandleTime: previous.time
+  };
+  assert.equal(validateActiveHourlySweep(bars, 'bullish', start, active, start + 3 * 3600000), null);
+  assert.equal(validateActiveHourlySweep(bars, 'bearish', start - 3600000, active, start + 3 * 3600000), null);
+  assert.equal(validateActiveHourlySweep(bars, 'bullish', start - 3600000,
+    { ...active, referenceCandleTime: start - 3600000 }, start + 3 * 3600000), null);
+});
+
 test('AUTO H1 does not treat an unfinished H1 candle as the latest completed candle', () => {
   const start = Date.parse('2026-11-16T08:00:00Z');
   const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
@@ -583,12 +644,32 @@ test('AUTO H1 does not treat an unfinished H1 candle as the latest completed can
   assert.equal(findHourlySweep([previous, candidate, unfinished], 'bullish', start, now), null);
 });
 
-test('first M5 entry checks the latest intrabar candle instead of re-signalling an old touch', () => {
+test('first M5 entry retains a recent Fib 0.5 touch for one following candle', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
   const oldTouch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
   const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
-  const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, []);
-  assert.equal(entries.some(e => e.type === 'FIRST_ENTRY'), false);
+  const entries = findM5Entries([oldTouch, latest], 'bullish', oldTouch.time, fib, [], Date.parse('2026-11-10T05:10:30Z'));
+  const first = entries.find(entry => entry.type === 'FIRST_ENTRY');
+  assert.ok(first);
+  assert.equal(first.time, oldTouch.time);
+  assert.equal(first.entry, fib['0.5']);
+});
+
+test('first M5 entry is not re-signalled after a later candle already hits SL or TP', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
+  const resolved = c('2026-11-10T05:05:00', 111, 121, 110, 119);
+  const latest = c('2026-11-10T05:10:00', 114, 115, 113, 114);
+  const entries = findM5Entries([touch, resolved, latest], 'bullish', touch.time, fib, [], Date.parse('2026-11-10T05:15:00Z'));
+  assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
+});
+
+test('first M5 entry recent-bar fallback rejects a touch older than the live freshness window', () => {
+  const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
+  const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
+  const latest = c('2026-11-10T05:05:00', 113, 114, 112, 113);
+  const entries = findM5Entries([touch, latest], 'bullish', touch.time, fib, [], Date.parse('2026-11-10T05:30:00Z'));
+  assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
 });
 
 test('second M5 entry reports the latest completed candle only', () => {
