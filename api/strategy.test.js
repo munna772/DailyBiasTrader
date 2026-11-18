@@ -6,7 +6,7 @@ const path = require('node:path');
 const { findSweep, calculateFib, candleTouches, findHourlySweep, findM5Entries, findHistoricalM5Entries, findDailyBias, dailyConfirmation, analyzeStrategy, isInsideThreeBullish, isInsideThreeBearish, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries } = require('./server');
+const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -843,6 +843,54 @@ test('bar countdown receives latest real D1, H1 and M5 timestamps and preserves 
 test('SiftingIO history URL rejects unsupported intervals and invalid limits', () => {
   assert.throws(() => buildSeriesUrl('XAUUSD', '15m', 100, Date.now()), /Unsupported SiftingIO interval/);
   assert.throws(() => buildSeriesUrl('XAUUSD', '5m', 2500, Date.now()), /limit must be an integer/);
+});
+
+test('one-minute fallback rebuilds H1 only from 60 consecutive completed real minutes', () => {
+  const start = Date.parse('2026-11-18T05:00:00Z');
+  const minutes = Array.from({ length: 60 }, (_, index) => ({
+    time: start + index * 60000,
+    open: 2300 + index * 0.1,
+    high: 2301 + index * 0.1,
+    low: 2299 + index * 0.1,
+    close: 2300.5 + index * 0.1,
+    volume: 2
+  }));
+  const result = buildHourlyBarsFromOneMinute(minutes, start + 60 * 60000);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].time, start);
+  assert.equal(result[0].open, 2300);
+  assert.equal(result[0].high, 2301 + 59 * 0.1);
+  assert.equal(result[0].low, 2299);
+  assert.equal(result[0].close, 2300.5 + 59 * 0.1);
+  assert.equal(result[0].volume, 120);
+  assert.equal(assessH1DataFreshness(result, start + 70 * 60000).stale, false);
+});
+
+test('H1 fallback rejects a missing minute and an unfinished hourly bucket', () => {
+  const start = Date.parse('2026-11-18T05:00:00Z');
+  const minutes = Array.from({ length: 60 }, (_, index) => ({
+    time: start + index * 60000,
+    open: 100 + index, high: 102 + index, low: 99 + index, close: 101 + index, volume: 1
+  }));
+  assert.equal(buildHourlyBarsFromOneMinute(minutes.filter((_, index) => index !== 31), start + 60 * 60000).length, 0);
+  assert.equal(buildHourlyBarsFromOneMinute(minutes, start + 59 * 60000).length, 0);
+  assert.equal(buildHourlyBarsFromOneMinute(minutes, start + 60 * 60000).length, 1);
+});
+
+test('H1 fallback adds newer real hourly buckets and preserves provider H1 bars', () => {
+  const start = Date.parse('2026-11-18T05:00:00Z');
+  const providerBar = { time: start - 3600000, open: 90, high: 95, low: 89, close: 94, volume: 8 };
+  const minutes = Array.from({ length: 120 }, (_, index) => ({
+    time: start + index * 60000,
+    open: 100 + index, high: 102 + index, low: 99 + index, close: 101 + index, volume: 1
+  }));
+  const merged = mergeHourlyBars([providerBar], minutes, start + 120 * 60000);
+  assert.equal(merged.added, 2);
+  assert.equal(merged.bars.length, 3);
+  assert.equal(merged.bars[0].close, 94);
+  assert.equal(merged.bars[1].time, start);
+  assert.equal(merged.bars[2].time, start + 3600000);
+  assert.equal(assessH1DataFreshness(merged.bars, start + 130 * 60000).stale, false);
 });
 
 test('one-minute fallback creates an M5 candle only from five complete real minutes', () => {
