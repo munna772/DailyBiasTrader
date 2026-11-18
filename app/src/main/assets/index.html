@@ -30,8 +30,16 @@ select{font-size:13px}
 .wait{color:var(--amber)}.good{color:var(--green)}.bad{color:var(--red)}
 .notice{font-size:11px;line-height:1.5;color:#a9b8cc}
 .notice.warn{color:#ffd27b}
+.chart-stage{position:relative;width:100%;isolation:isolate}
 #tv_chart{height:440px;min-height:360px;width:100%;overflow:hidden;border-radius:10px;background:#0b1423;position:relative}
 #tv_chart iframe{display:block;width:100%;height:100%;border:0;background:#0b1423}
+.bar-countdown-overlay{position:absolute;right:9px;bottom:38px;z-index:20;display:flex;align-items:center;gap:7px;max-width:calc(100% - 18px);padding:6px 9px;border:1px solid rgba(91,112,139,.78);border-radius:8px;background:rgba(8,13,24,.94);box-shadow:0 3px 12px rgba(0,0,0,.28);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);pointer-events:none;font-variant-numeric:tabular-nums}
+.bar-countdown-label{font-size:10px;font-weight:800;letter-spacing:.55px;color:#b6c5d9;white-space:nowrap}
+.bar-countdown-value{display:block;font:800 14px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.4px;color:#eef4ff;margin:0;white-space:nowrap}
+.bar-countdown-overlay .pill{font-size:9px;padding:3px 5px;letter-spacing:.25px}
+.bar-countdown-overlay.is-paused{border-color:#80612a}
+.bar-countdown-overlay.is-paused .bar-countdown-value{color:#ffd27b}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .trade-history-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #1b2a3d;font-size:12px}
 .trade-history-row:last-child{border:0}
 .trade-history-row .meta{color:var(--muted);font-size:10px;margin-top:3px}
@@ -47,8 +55,6 @@ select{font-size:13px}
 .pill.warn{background:#45341b;color:#ffd27b}
 .pill.good{background:#123c2c;color:#7cf4bb}
 .pill.bad{background:#49232d;color:#ff9cac}
-.bar-countdown{margin-top:8px}
-.bar-countdown-value{display:block;font:800 27px/1.25 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1px;font-variant-numeric:tabular-nums;margin-top:5px}
 .hidden{display:none!important}
 footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
 @media(min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}#tv_chart{height:520px}}
@@ -70,11 +76,14 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     <button id="reloadChart" style="margin-left:auto">Reload chart</button>
   </div>
   <div id="chartMessage" role="status" aria-live="polite">Loading TradingView chart…</div>
-  <div id="tv_chart" aria-label="TradingView market chart"></div>
-  <div class="metric bar-countdown" id="barCountdown" aria-label="Selected chart timeframe bar countdown">
-    <div class="row"><small id="barCountdownLabel">D1 BAR COUNTDOWN</small><span class="pill warn" id="barCountdownState">WAITING FOR DATA</span></div>
-    <b class="bar-countdown-value" id="barCountdownValue" aria-live="off">—</b>
-    <div class="sub" id="barCountdownNote">Waiting for fresh Gold candle timestamps from SiftingIO.</div>
+  <div class="chart-stage">
+    <div id="tv_chart" aria-label="TradingView market chart"></div>
+    <div class="bar-countdown-overlay is-paused" id="barCountdown" role="status" aria-label="Selected chart timeframe close countdown">
+      <span class="bar-countdown-label" id="barCountdownLabel">D1</span>
+      <b class="bar-countdown-value" id="barCountdownValue" aria-live="off">—</b>
+      <span class="pill warn" id="barCountdownState">WAITING</span>
+      <span class="sr-only" id="barCountdownNote">Waiting for fresh Gold candle timestamps from SiftingIO.</span>
+    </div>
   </div>
   <div class="sub" style="margin-top:8px">Chart source: TradingView. Candle availability, exchange coverage and delays depend on the selected TradingView symbol/feed.</div>
 </section>
@@ -321,12 +330,16 @@ function formatBarCountdown(milliseconds, interval){
 function renderBarCountdown(){
   const interval = BAR_INTERVALS[selectedInterval];
   if(!interval) return;
-  el('barCountdownLabel').textContent = interval.label + ' BAR COUNTDOWN';
+  const overlay = el('barCountdown');
+  el('barCountdownLabel').textContent = interval.label;
   const pause = (state,note) => {
     el('barCountdownValue').textContent = '—';
     el('barCountdownState').textContent = state;
     el('barCountdownState').className = 'pill warn';
     el('barCountdownNote').textContent = note;
+    overlay.classList.add('is-paused');
+    overlay.title = note;
+    overlay.setAttribute('aria-label',interval.label + ' bar countdown: ' + state + '. ' + note);
   };
   if(interval.key === 'M5' && (!latestDataFreshness || latestDataFreshness.stale === true || latestDataFreshness.status !== 'FRESH')){
     pause('PAUSED','No fresh M5 feed confirmation. The countdown stays paused rather than inventing a live bar while data is stale or missing.');
@@ -357,9 +370,13 @@ function renderBarCountdown(){
   const nextClose = latestOpen + (elapsedBars+1)*interval.durationMs;
   const remaining = Math.max(0,nextClose-now);
   el('barCountdownValue').textContent = formatBarCountdown(remaining,interval);
-  el('barCountdownState').textContent = 'COUNTING';
+  el('barCountdownState').textContent = 'LIVE';
   el('barCountdownState').className = 'pill good';
-  el('barCountdownNote').textContent = 'Based on ' + timestampSource + ' (' + formatTime(new Date(latestOpen).toISOString()) + '). TradingView chart feed is independent.';
+  const note = 'Based on ' + timestampSource + ' (' + formatTime(new Date(latestOpen).toISOString()) + '). TradingView chart feed is independent.';
+  el('barCountdownNote').textContent = note;
+  overlay.classList.remove('is-paused');
+  overlay.title = note;
+  overlay.setAttribute('aria-label',interval.label + ' bar closes in ' + el('barCountdownValue').textContent + '. ' + note);
 }
 function setMetric(id, text, state){
   const node = el(id);
