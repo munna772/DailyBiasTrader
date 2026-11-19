@@ -101,7 +101,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     </select>
     <button id="applyManualD1Bias">Apply</button>
   </div>
-  <div class="notice" id="manualBiasNote" style="margin-bottom:10px">Select the daily direction you determined yourself. The app does not analyse D1 patterns or sweeps.</div>
+  <div class="notice" id="manualBiasNote" style="margin-bottom:10px">D1 remains available for your own analysis. This optional daily selection does not control H1 confirmation or M5 entries.</div>
   <div class="row" style="margin:2px 0 8px;justify-content:flex-start;flex-wrap:wrap">
     <label for="manualH1Bias" class="sub" style="margin-right:3px">H1 CONFIRMATION MODE</label>
     <select id="manualH1Bias" aria-label="H1 confirmation mode">
@@ -111,10 +111,10 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     </select>
     <button id="applyManualH1Bias">Apply</button>
   </div>
-  <div class="notice" id="manualH1BiasNote" style="margin-bottom:10px">AUTO: H1 checks the latest completed candle for a sweep in your selected daily direction, after you set that direction.</div>
+  <div class="notice" id="manualH1BiasNote" style="margin-bottom:10px">AUTO: H1 independently checks the latest completed H1 candle for a bullish or bearish sweep. No D1 direction is required.</div>
   <div class="grid">
     <div class="metric"><small>DAILY BIAS</small><b class="wait" id="bias">WAITING FOR FEED</b><div class="sub" id="biasDetail">No calculation yet</div></div>
-    <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">Requires your manually selected daily bias</div></div>
+    <div class="metric"><small>H1 CONFIRMATION</small><b class="wait" id="h1">WAITING</b><div class="sub" id="h1Detail">H1 checks its own latest completed candle in either direction.</div></div>
     <div class="metric"><small>M5 ENTRY</small><b class="wait" id="entry">WAITING</b><div class="sub" id="entryDetail">Requires H1 confirmation</div></div>
     <div class="metric"><small>OHLC DATA</small><b class="wait" id="dataStatus">NOT CONNECTED</b><div class="sub" id="dataDetail">D1 / H1 / M5</div></div>
   </div>
@@ -210,23 +210,19 @@ function loadManualH1Bias(){
   return null;
 }
 let manualH1Bias = loadManualH1Bias();
-const AUTO_H1_CONFIRMATION_KEY = 'dailybiastrader_auto_h1_after_manual_bias_v2';
+const AUTO_H1_CONFIRMATION_KEY = 'dailybiastrader_h1_confirmation_independent_v1';
 function loadActiveAutoH1Sweep(){
   try{
     const raw = localStorage.getItem(AUTO_H1_CONFIRMATION_KEY);
     if(!raw) return null;
     const saved = JSON.parse(raw);
-    const values = saved && [
-      saved.biasSelectedAt,saved.candleTime,saved.closeTime,saved.referenceCandleTime
-    ].map(Number);
-    if(saved && ['BULLISH','BEARISH'].includes(saved.bias) &&
+    const values = saved && [saved.candleTime,saved.closeTime,saved.referenceCandleTime].map(Number);
+    if(saved && saved.mode === 'H1_INDEPENDENT_V1' && ['BULLISH','BEARISH'].includes(saved.bias) &&
        values.every(value => Number.isFinite(value) && value > 0) &&
        Number(saved.closeTime) === Number(saved.candleTime) + 60 * 60 * 1000){
       return {
-        bias:saved.bias,
-        biasSelectedAt:Number(saved.biasSelectedAt),
-        candleTime:Number(saved.candleTime),
-        closeTime:Number(saved.closeTime),
+        mode:saved.mode,bias:saved.bias,
+        candleTime:Number(saved.candleTime),closeTime:Number(saved.closeTime),
         referenceCandleTime:Number(saved.referenceCandleTime)
       };
     }
@@ -597,31 +593,24 @@ async function refreshStrategy(){
       throw new Error(error);
     }
     const s = payload.strategy || {};
-    const biasSelectedAt = Number(s.biasSelectedAt || 0);
+    const h1Bias = String(s.h1Bias || '').toUpperCase();
     if(manualH1Bias || s.h1Mode === 'MANUAL'){
       clearActiveAutoH1Sweep();
-    }else if(['BULLISH','BEARISH'].includes(s.bias) && s.h1Status === 'CONFIRMED' &&
+    }else if(['BULLISH','BEARISH'].includes(h1Bias) && s.h1Status === 'CONFIRMED' &&
              s.h1Sweep && !s.h1Sweep.manual && s.h1Sweep.candle){
       const captured = {
-        bias:s.bias,
-        biasSelectedAt,
-        candleTime:Number(s.h1Sweep.candle.time),
-        closeTime:Number(s.h1Sweep.time),
+        mode:'H1_INDEPENDENT_V1',bias:h1Bias,
+        candleTime:Number(s.h1Sweep.candle.time),closeTime:Number(s.h1Sweep.time),
         referenceCandleTime:Number(s.h1Sweep.referenceCandleTime)
       };
-      const validCapture = biasSelectedAt > 0 &&
+      const validCapture =
         [captured.candleTime,captured.closeTime,captured.referenceCandleTime].every(value => Number.isFinite(value) && value > 0) &&
         captured.closeTime === captured.candleTime + 60 * 60 * 1000;
-      if(validCapture){
-        activeAutoH1Sweep = captured;
-        saveActiveAutoH1Sweep(captured);
-      }
+      if(validCapture){ activeAutoH1Sweep = captured; saveActiveAutoH1Sweep(captured); }
     }else if(activeAutoH1Sweep){
-      const sameD1Sequence = activeAutoH1Sweep.bias === s.bias &&
-        activeAutoH1Sweep.biasSelectedAt === biasSelectedAt;
-      // The API has revalidated the stored candle on this successful response.
-      // If confirmation is no longer valid, clear the client copy rather than reviving it later.
-      if(!sameD1Sequence || s.h1Status !== 'CONFIRMED') clearActiveAutoH1Sweep();
+      const sameH1Anchor = activeAutoH1Sweep.mode === 'H1_INDEPENDENT_V1' && activeAutoH1Sweep.bias === h1Bias;
+      // The API revalidates the original H1 candle before retaining it.
+      if(!sameH1Anchor || s.h1Status !== 'CONFIRMED') clearActiveAutoH1Sweep();
     }
     const freshness = payload.dataFreshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null };
     const h1Freshness = payload.h1Freshness || { status: 'UNKNOWN', stale: true, ageMinutes: null, latestCandleAt: null, latestCandleCloseAt: null };
@@ -639,14 +628,14 @@ async function refreshStrategy(){
     const isManualH1 = s.h1Mode === 'MANUAL';
     const manualH1Since = Number(s.manualH1BiasSince || (manualH1Bias && manualH1Bias.since) || 0);
     setMetric('bias',
-      s.bias === 'WAITING' && !hasManualDailyBias ? 'SELECT DAILY BIAS' : (s.bias || 'WAITING'),
+      s.bias === 'WAITING' && !hasManualDailyBias ? 'DAILY BIAS OPTIONAL' : (s.bias || 'WAITING'),
       s.bias === 'BULLISH' ? 'good' : s.bias === 'BEARISH' ? 'bad' : 'wait');
     el('biasDetail').textContent = hasManualDailyBias
       ? 'You selected ' + s.bias.toLowerCase() + ' as the daily bias at ' + formatTime(manualSince) +
         '. D1 patterns and sweeps are not analysed; H1 confirmation starts after your selection.'
       : (s.biasReason || 'Select your manually determined daily bias above.');
     const normalH1State = s.h1Status === 'CONFIRMED' ? (isManualH1 ? 'MANUAL CONFIRMED' : 'CONFIRMED') :
-      s.h1Status === 'MANUAL_H1_DIRECTION_MISMATCH' ? 'DIRECTION MISMATCH' :
+      s.h1Status === 'AMBIGUOUS_H1_SWEEP' ? 'AMBIGUOUS H1 SWEEP' :
       s.h1Status === 'WAITING_FOR_MANUAL_H1_CANDLE' ? 'WAITING FOR H1 CANDLE' :
       (s.h1Status || 'WAITING').replace(/_/g,' ');
     const h1DisplayState = h1DataStale
@@ -658,42 +647,39 @@ async function refreshStrategy(){
       const latestH1Close = h1Freshness.latestCandleCloseAt ? formatTime(h1Freshness.latestCandleCloseAt) : 'unavailable';
       const h1Age = h1Freshness.ageMinutes === null ? 'age unknown' : h1Freshness.ageMinutes + ' min since close';
       if(isManualH1 && s.h1Status === 'CONFIRMED'){
-        el('h1Detail').textContent = 'MANUAL ' + s.manualH1Bias + ' H1 CONFIRMATION IS SELECTED (applied at ' + formatTime(manualH1Since) +
-          '). This is a user-selected direction, NOT a detected H1 liquidity sweep. The latest completed H1 candle opened at ' + latestH1Open +
+        el('h1Detail').textContent = 'MANUAL ' + s.manualH1Bias + ' H1 DIRECTION IS SELECTED (applied at ' + formatTime(manualH1Since) +
+          '). This manual H1 choice is independent of D1. The latest completed H1 candle opened at ' + latestH1Open +
           ' and closed at ' + latestH1Close + ' (' + h1Age + '); the H1 feed is stale. M5 entries are PAUSED until fresh H1 data is available. ' +
           'The old candle in history is only a reference and is not proof of a current H1 sweep.';
       } else {
         const sweepHistory = s.h1Sweep && !s.h1Sweep.manual ? 'A matching H1 sweep exists in the returned history at ' + formatTime(s.h1Sweep.time) + '. ' : 'No matching sweep can be verified from fresh H1 data. ';
         el('h1Detail').textContent = 'Latest completed H1 candle opened at ' + latestH1Open + ' and closed at ' + latestH1Close + ' (' + h1Age + '). The H1 feed is stale; ' +
-          (hasManualDailyBias ? 'the app cannot verify a matching ' + s.bias.toLowerCase() + ' sweep after ' + formatTime(manualSince) + '. ' : 'a current H1 confirmation cannot be verified. ') +
+          'H1 confirmation is independent of D1, but a current H1 sweep cannot be verified from stale data. ' +
           sweepHistory + 'Wait for fresh H1 candles. M5 entries stay paused until H1 data is fresh. Missing data is not treated as proof that no sweep occurred.';
       }
     } else if(isManualH1 && s.h1Status === 'CONFIRMED'){
-      el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 confirmation applied at ' + formatTime(manualH1Since) +
-        '. Automatic H1 sweep confirmation is bypassed. Fibonacci uses the latest completed H1 candle opened at ' +
+      el('h1Detail').textContent = 'Manual ' + s.manualH1Bias.toLowerCase() + ' H1 direction applied at ' + formatTime(manualH1Since) +
+        '. This direction is independent of D1. Fibonacci uses the latest completed H1 candle opened at ' +
         formatTime(s.manualH1AnchorTime || (s.h1Sweep && s.h1Sweep.referenceCandleTime)) + ' and closed at ' +
         formatTime(s.manualH1AnchorCloseTime) + '. M5 monitoring starts at ' +
         formatTime(s.manualH1MonitoringSince || (s.h1Sweep && s.h1Sweep.time)) + '; older M5 candles are ignored.';
-    } else if(s.h1Status === 'MANUAL_H1_DIRECTION_MISMATCH'){
-      el('h1Detail').textContent = s.h1Reason || 'Manual H1 direction must match your selected daily bias.';
+    } else if(s.h1Status === 'AMBIGUOUS_H1_SWEEP'){
+      el('h1Detail').textContent = s.h1Reason || 'The latest H1 candle swept both sides; direction is ambiguous, so entries are paused.';
     } else if(s.h1Status === 'WAITING_FOR_MANUAL_H1_CANDLE'){
       el('h1Detail').textContent = s.h1Reason || 'No completed H1 candle is available to anchor Fibonacci.';
     } else {
       el('h1Detail').textContent = s.h1Sweep
-        ? 'H1 sweep candle opened at ' + formatTime(s.h1Sweep.candle && s.h1Sweep.candle.time) +
+        ? (s.h1Bias || 'H1') + ' sweep candle opened at ' + formatTime(s.h1Sweep.candle && s.h1Sweep.candle.time) +
           ' swept the immediately previous completed H1 candle opened at ' + formatTime(s.h1Sweep.referenceCandleTime) +
           '. The sweep candle closed at ' + formatTime(s.h1Sweep.time) + '.' +
-          (s.h1Sweep.persisted ? ' This earlier confirmed sweep is retained while M5 continues monitoring under the same daily-bias selection.' : '')
-        : (hasManualDailyBias || s.h1Status === 'WAITING_FOR_H1_SWEEP')
-          ? s.h1CandidateTime && s.h1ReferenceTime
-            ? 'Latest completed H1 candle opened at ' + formatTime(s.h1CandidateTime) +
-              ' was checked against the immediately previous H1 candle opened at ' + formatTime(s.h1ReferenceTime) +
-              '; no matching ' + s.bias.toLowerCase() + ' sweep was found. Wait for the next H1 candle to close.'
-            : s.h1CandidateTime
-              ? 'Only one completed H1 candle is available. The app needs the immediately previous H1 candle to verify a sweep.'
-              : 'Waiting for the latest completed H1 candle after your daily-bias selection at ' + formatTime(manualSince || s.h1SearchAfter) +
-                '. It will be compared only with the immediately previous completed H1 candle.'
-          : 'Requires a matching H1 sweep after you set the daily bias';
+          (s.h1Sweep.persisted ? ' This independently confirmed H1 sweep remains active while M5 continues monitoring.' : '')
+        : s.h1CandidateTime && s.h1ReferenceTime
+          ? 'Latest completed H1 candle opened at ' + formatTime(s.h1CandidateTime) +
+            ' was checked against the immediately previous H1 candle opened at ' + formatTime(s.h1ReferenceTime) +
+            '; neither a clear bullish nor bearish sweep was found. Wait for the next H1 candle to close.'
+          : s.h1CandidateTime
+            ? 'Only one completed H1 candle is available. The app needs the immediately previous H1 candle to verify a sweep.'
+            : 'Waiting for the latest completed H1 candle. It will be compared only with the immediately previous completed H1 candle for a bullish or bearish sweep.';
     }
     const entryState = (s.entryStatus || 'WAITING').replace(/_/g,' ');
     const h1EntryPaused = h1DataStale && s.h1Status === 'CONFIRMED';
@@ -764,13 +750,13 @@ function syncManualBiasControls(){
   el('manualD1Bias').value = manualD1Bias ? manualD1Bias.bias : 'AUTO';
   el('manualBiasNote').textContent = manualD1Bias
     ? 'MANUAL ' + manualD1Bias.bias + ' active since ' + formatTime(manualD1Bias.since) +
-      '. Your daily direction is selected manually. H1 must confirm in the same direction.'
+      '. This daily bias is for your reference only and does not control H1 confirmation.'
     : 'Select the daily direction you determined yourself. The app does not analyse D1 patterns or sweeps.';
   el('manualH1Bias').value = manualH1Bias ? manualH1Bias.bias : 'AUTO';
   el('manualH1BiasNote').textContent = manualH1Bias
     ? 'MANUAL ' + manualH1Bias.bias + ' H1 confirmation selected at ' + formatTime(manualH1Bias.since) +
-      '. It must match the active D1 direction. Fibonacci rolls forward to the latest completed H1 candle; M5 monitoring waits until that candle closes and after your selection.'
-    : 'AUTO: H1 checks the latest completed candle for a sweep in your selected daily direction, after you set that direction.';
+      '. It is independent of your D1 selection. Fibonacci rolls forward to the latest completed H1 candle; M5 monitoring waits until that candle closes and after your selection.'
+    : 'AUTO: H1 independently checks the latest completed H1 candle for a bullish or bearish sweep. No D1 direction is required.';
 }
 el('applyManualD1Bias').addEventListener('click',function(){
   const selected = el('manualD1Bias').value;

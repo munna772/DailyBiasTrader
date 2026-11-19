@@ -25,9 +25,9 @@ The TradingView chart is a separate display feed and may not have identical cand
 
 ## Strategy rules
 
-- Daily bias is selected manually by the user after checking the D1 chart. The strategy engine does not scan D1 liquidity levels, sweeps, candlestick patterns, or D1 confirmation rules.
-- H1 AUTO confirmation checks only the latest completed H1 candle against the immediately preceding completed H1 candle, in the manually selected daily direction, and only when the H1 candle closes after the selection timestamp.
-- H1 MANUAL confirmation remains available. The selected H1 direction must match the manually selected daily bias; Fibonacci uses the latest completed H1 candle as its reference.
+- D1 chart remains available for the user’s own analysis. Daily bias is optional reference information; H1 does not require D1 confirmation or a D1 direction.
+- H1 AUTO confirmation independently checks the latest completed H1 candle against the immediately preceding completed H1 candle for either a bullish low sweep or a bearish high sweep. If one candle sweeps both sides, the app reports ambiguity and does not guess.
+- H1 MANUAL confirmation remains available and is independent of any D1 direction. Fibonacci uses the latest completed H1 candle as its reference.
 - Fibonacci is anchored to the entire H1 reference/sweep candle high-low range. BUY: Fib 1 is the low and Fib 0 is the high. SELL: Fib 1 is the high and Fib 0 is the low.
 - M5 first entry only: touch of Fib 0.5; BUY stop at Fib 0.618 below entry, SELL stop at Fib 0.618 above entry; target Fib 0.
 - Risk validation checks stop-loss side and target side. Blocked levels remain visible for review; the app does not send orders or guarantee that a setup is profitable.

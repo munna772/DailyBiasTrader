@@ -470,16 +470,13 @@ const server = http.createServer(async (req, res) => {
   const manualBiasParam = String(url.searchParams.get('manualBias') || '').toUpperCase();
   let manualBias = null;
   let manualBiasSince = null;
-  if (manualBiasParam) {
-    if (manualBiasParam !== 'BULLISH' && manualBiasParam !== 'BEARISH') {
-      return send(res, 400, { error: 'manualBias must be BULLISH or BEARISH.' });
-    }
+  if (manualBiasParam === 'BULLISH' || manualBiasParam === 'BEARISH') {
     const requestedSince = Number(url.searchParams.get('manualBiasSince'));
-    if (!Number.isFinite(requestedSince) || requestedSince <= 0 || requestedSince > Date.now() + 5 * 60 * 1000) {
-      return send(res, 400, { error: 'A valid manualBiasSince timestamp is required. Reapply your daily-bias selection.' });
+    if (Number.isFinite(requestedSince) && requestedSince > 0 && requestedSince <= Date.now() + 5 * 60 * 1000) {
+      manualBias = manualBiasParam;
+      manualBiasSince = requestedSince;
     }
-    manualBias = manualBiasParam;
-    manualBiasSince = requestedSince;
+    // Daily bias is optional; invalid or missing daily metadata must not block H1.
   }
   let activeH1 = null;
   const activeH1Param = String(url.searchParams.get('activeH1') || '');
@@ -515,7 +512,7 @@ const server = http.createServer(async (req, res) => {
     const h1Freshness = assessH1DataFreshness(market.h1, strategyNow);
     const rawStrategy = analyzeStrategy({ ...market, symbol, manualBias, manualBiasSince, manualH1Bias, manualH1BiasSince, activeH1, now: strategyNow });
     const result = gateStrategyOnFreshness(rawStrategy, freshness, h1Freshness);
-    const strategySide = rawStrategy.bias === 'BULLISH' ? 'bullish' : rawStrategy.bias === 'BEARISH' ? 'bearish' : null;
+    const strategySide = rawStrategy.h1Bias === 'BULLISH' ? 'bullish' : rawStrategy.h1Bias === 'BEARISH' ? 'bearish' : null;
     const historicalEntries = marketDataFreshForEntries(freshness, h1Freshness) &&
       rawStrategy.h1Status === 'CONFIRMED' && strategySide && rawStrategy.fib && rawStrategy.h1Sweep
       ? findHistoricalM5Entries(market.m5Closed, strategySide, rawStrategy.h1Sweep.time, rawStrategy.fib)

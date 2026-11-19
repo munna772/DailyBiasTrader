@@ -79,43 +79,37 @@ function findHourlySweep(rawBars, side, afterTime, now = Date.now()) {
   return null;
 }
 
-function validateActiveHourlySweep(rawBars, side, afterTime, activeH1, now = Date.now()) {
-  if (!activeH1 || typeof activeH1 !== 'object') return null;
-  const expectedBias = side === 'bullish' ? 'BULLISH' : 'BEARISH';
-  if (String(activeH1.bias || '').toUpperCase() !== expectedBias) return null;
-  if (Number(activeH1.biasSelectedAt) !== Number(afterTime)) return null;
+function findIndependentHourlySweep(rawBars, now = Date.now()) {
+  const bullish = findHourlySweep(rawBars, 'bullish', 0, now);
+  const bearish = findHourlySweep(rawBars, 'bearish', 0, now);
+  if (bullish && bearish) return { ambiguous: true, bullish, bearish };
+  return bullish || bearish;
+}
 
+function validateActiveHourlySweep(rawBars, activeH1, now = Date.now()) {
+  if (!activeH1 || typeof activeH1 !== 'object' || activeH1.mode !== 'H1_INDEPENDENT_V1') return null;
+  const bias = String(activeH1.bias || '').toUpperCase();
+  const side = bias === 'BULLISH' ? 'bullish' : bias === 'BEARISH' ? 'bearish' : null;
+  if (!side) return null;
   const candleTime = Number(activeH1.candleTime);
   const closeTime = candleTime + H1_CANDLE_MS;
   if (!Number.isFinite(candleTime) || candleTime <= 0 ||
-      Number(activeH1.closeTime) !== closeTime || closeTime <= Number(afterTime)) return null;
-
-  const bars = normalizeCandles(rawBars)
-    .filter(candle => candle.time + H1_CANDLE_MS <= Number(now));
-  const index = bars.findIndex(candle => candle.time === candleTime);
+      Number(activeH1.closeTime) !== closeTime || closeTime > Number(now)) return null;
+  const bars = normalizeCandles(rawBars).filter(c => c.time + H1_CANDLE_MS <= Number(now));
+  const index = bars.findIndex(c => c.time === candleTime);
   if (index < 1) return null;
-
-  const current = bars[index];
-  const previous = bars[index - 1];
+  const current = bars[index], previous = bars[index - 1];
   if (Number(activeH1.referenceCandleTime) !== previous.time) return null;
-
   if (side === 'bullish') {
     const level = previous.low;
     if (!(current.low < level && current.close > level)) return null;
-    return {
-      side, level, time: closeTime, candleTime: current.time,
-      candle: current, referenceCandleTime: previous.time,
-      referenceCandle: previous, lookbackBars: 1, persisted: true
-    };
+    return { side, level, time: closeTime, candleTime: current.time, candle: current,
+      referenceCandleTime: previous.time, referenceCandle: previous, lookbackBars: 1, persisted: true };
   }
-
   const level = previous.high;
   if (!(current.high > level && current.close < level)) return null;
-  return {
-    side, level, time: closeTime, candleTime: current.time,
-    candle: current, referenceCandleTime: previous.time,
-    referenceCandle: previous, lookbackBars: 1, persisted: true
-  };
+  return { side, level, time: closeTime, candleTime: current.time, candle: current,
+    referenceCandleTime: previous.time, referenceCandle: previous, lookbackBars: 1, persisted: true };
 }
 
 function calculateFib(sweep, side) {
@@ -229,58 +223,44 @@ function gateStrategyOnFreshness(strategy, m5Freshness, h1Freshness) {
 function analyzeStrategy(input) {
   const h1 = normalizeCandles(input.h1), m5 = normalizeCandles(input.m5);
   const suppliedNow = Number(input.now);
-  const evaluationTime = Number.isFinite(suppliedNow) && suppliedNow > 0 ? suppliedNow : Date.now();
-  const completedH1 = h1.filter(candle => candle.time + H1_CANDLE_MS <= evaluationTime);
-  const requestedManualBias = String(input.manualBias || '').toUpperCase();
-  const manualBias = requestedManualBias === 'BULLISH' || requestedManualBias === 'BEARISH' ? requestedManualBias : null;
-  const manualBiasSince = Number(input.manualBiasSince);
-  const useManualBias = Boolean(manualBias && Number.isFinite(manualBiasSince) && manualBiasSince > 0);
+  const now = Number.isFinite(suppliedNow) && suppliedNow > 0 ? suppliedNow : Date.now();
+  const completedH1 = h1.filter(c => c.time + H1_CANDLE_MS <= now);
+
+  // D1 bias is optional reference information; it never gates H1 direction or timing.
+  const requestedDailyBias = String(input.manualBias || '').toUpperCase();
+  const dailyBias = requestedDailyBias === 'BULLISH' || requestedDailyBias === 'BEARISH' ? requestedDailyBias : null;
+  const dailyBiasSince = Number(input.manualBiasSince);
+  const hasManualDailyBias = Boolean(dailyBias && Number.isFinite(dailyBiasSince) && dailyBiasSince > 0);
+  const dailyMetadata = {
+    bias: hasManualDailyBias ? dailyBias : 'WAITING',
+    biasMode: hasManualDailyBias ? 'MANUAL' : 'UNSET',
+    manualBiasSince: hasManualDailyBias ? dailyBiasSince : null,
+    biasReason: hasManualDailyBias
+      ? 'Daily bias is manually selected for reference only; it does not control H1 confirmation.'
+      : 'Daily bias is optional. H1 confirmation works independently in either direction.'
+  };
+
   const requestedManualH1Bias = String(input.manualH1Bias || '').toUpperCase();
   const manualH1Bias = requestedManualH1Bias === 'BULLISH' || requestedManualH1Bias === 'BEARISH' ? requestedManualH1Bias : null;
   const manualH1BiasSince = Number(input.manualH1BiasSince);
   const useManualH1Bias = Boolean(manualH1Bias && Number.isFinite(manualH1BiasSince) && manualH1BiasSince > 0);
 
-  // The user supplies the daily direction; D1 strategy analysis is disabled.
-  if (!useManualBias) {
-    return {
-      bias: 'WAITING', biasMode: 'UNSET',
-      biasReason: 'Select your manually determined daily bias (Bullish or Bearish) to start H1 analysis.',
-      h1Status: 'WAITING_FOR_DAILY_BIAS',
-      h1Mode: useManualH1Bias ? 'MANUAL' : 'AUTO',
-      entryStatus: 'DISABLED', fib: null, entries: [], riskWarning: null,
-      data: { h1: h1.length, m5: m5.length }
-    };
-  }
-
-  const bias = manualBias, side = bias === 'BULLISH' ? 'bullish' : 'bearish';
-  const biasSelectedAt = manualBiasSince;
-  const biasReason = 'Daily bias manually selected; D1 analysis is not performed.';
-  const biasMetadata = { biasMode: 'MANUAL', manualBiasSince: biasSelectedAt, biasSelectedAt };
-
-  let h1Sweep;
+  let h1Sweep, h1Bias = null;
   let h1Metadata = { h1Mode: 'AUTO' };
   if (useManualH1Bias) {
-    if (manualH1Bias !== bias) {
-      return {
-        bias, biasReason, ...biasMetadata, h1Mode: 'MANUAL', manualH1Bias, manualH1BiasSince,
-        h1Status: 'MANUAL_H1_DIRECTION_MISMATCH',
-        h1Reason: 'Manual H1 direction must match the daily bias you selected. Change one of the manual directions or return H1 to AUTO.',
-        entryStatus: 'DISABLED', fib: null, entries: [], riskWarning: null,
-        data: { h1: h1.length, m5: m5.length }
-      };
-    }
+    // Manual H1 direction is independent of the optional D1 direction.
+    const side = manualH1Bias === 'BULLISH' ? 'bullish' : 'bearish';
     const anchor = completedH1[completedH1.length - 1] || null;
     if (!anchor) {
-      return {
-        bias, biasReason, ...biasMetadata, h1Mode: 'MANUAL', manualH1Bias, manualH1BiasSince,
+      return { ...dailyMetadata, h1Bias: null, h1Mode: 'MANUAL', manualH1Bias, manualH1BiasSince,
         h1Status: 'WAITING_FOR_MANUAL_H1_CANDLE',
-        h1Reason: 'No completed H1 candle is available at the time of manual confirmation, so Fibonacci cannot be anchored safely.',
+        h1Reason: 'No completed H1 candle is available to anchor Fibonacci.',
         entryStatus: 'DISABLED', fib: null, entries: [], riskWarning: null,
-        data: { h1: h1.length, m5: m5.length }
-      };
+        data: { h1: h1.length, m5: m5.length } };
     }
     const anchorCloseTime = anchor.time + H1_CANDLE_MS;
     const manualH1MonitoringSince = Math.max(manualH1BiasSince, anchorCloseTime);
+    h1Bias = manualH1Bias;
     h1Sweep = {
       side, level: side === 'bullish' ? anchor.low : anchor.high, time: manualH1MonitoringSince,
       candleTime: anchor.time, candle: anchor, lookbackBars: 0, manual: true
@@ -292,38 +272,52 @@ function analyzeStrategy(input) {
       manualH1Reference: 'Latest completed H1 candle immediately before current evaluation'
     };
   } else {
-    const newestH1Sweep = findHourlySweep(h1, side, biasSelectedAt, evaluationTime);
-    const retainedH1Sweep = newestH1Sweep ? null
-      : validateActiveHourlySweep(h1, side, biasSelectedAt, input.activeH1, evaluationTime);
-    h1Sweep = newestH1Sweep || retainedH1Sweep;
-    h1Metadata = { h1Mode: 'AUTO', h1ConfirmationSource: retainedH1Sweep ? 'PERSISTED' : 'LATEST_COMPLETED_CANDLE' };
-    if (!h1Sweep) {
-      const latestCandidate = completedH1[completedH1.length - 1] || null;
-      const previousReference = completedH1.length > 1 ? completedH1[completedH1.length - 2] : null;
-      const candidateIsEligible = Boolean(latestCandidate && latestCandidate.time + H1_CANDLE_MS > biasSelectedAt);
+    const newest = findIndependentHourlySweep(h1, now);
+    if (newest && newest.ambiguous) {
+      const latest = completedH1[completedH1.length - 1] || null;
+      const previous = completedH1.length > 1 ? completedH1[completedH1.length - 2] : null;
       return {
-        bias, biasReason, ...biasMetadata, ...h1Metadata,
-        h1Status: 'WAITING_FOR_H1_SWEEP',
-        h1SearchAfter: biasSelectedAt,
-        h1BarsChecked: candidateIsEligible ? 1 : 0,
-        h1CandidateTime: candidateIsEligible ? latestCandidate.time : null,
-        h1CandidateCloseTime: candidateIsEligible ? latestCandidate.time + H1_CANDLE_MS : null,
-        h1ReferenceTime: candidateIsEligible && previousReference ? previousReference.time : null,
-        h1ReferenceCloseTime: candidateIsEligible && previousReference ? previousReference.time + H1_CANDLE_MS : null,
+        ...dailyMetadata, h1Bias: null, h1Mode: 'AUTO',
+        h1ConfirmationSource: 'LATEST_COMPLETED_CANDLE',
+        h1Status: 'AMBIGUOUS_H1_SWEEP',
+        h1Reason: 'The latest completed H1 candle swept both the previous H1 high and low. Direction is ambiguous, so no H1 direction or M5 entry is selected.',
+        h1CandidateTime: latest ? latest.time : null,
+        h1ReferenceTime: previous ? previous.time : null,
         entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null,
         data: { h1: h1.length, m5: m5.length }
       };
     }
+    const retained = newest ? null : validateActiveHourlySweep(h1, input.activeH1, now);
+    h1Sweep = newest || retained;
+    if (!h1Sweep) {
+      const latest = completedH1[completedH1.length - 1] || null;
+      const previous = completedH1.length > 1 ? completedH1[completedH1.length - 2] : null;
+      return {
+        ...dailyMetadata, h1Bias: null, h1Mode: 'AUTO',
+        h1ConfirmationSource: 'LATEST_COMPLETED_CANDLE',
+        h1Status: 'WAITING_FOR_H1_SWEEP',
+        h1BarsChecked: latest && previous ? 1 : 0,
+        h1CandidateTime: latest ? latest.time : null,
+        h1CandidateCloseTime: latest ? latest.time + H1_CANDLE_MS : null,
+        h1ReferenceTime: previous ? previous.time : null,
+        h1ReferenceCloseTime: previous ? previous.time + H1_CANDLE_MS : null,
+        entryStatus: 'WAITING', fib: null, entries: [], riskWarning: null,
+        data: { h1: h1.length, m5: m5.length }
+      };
+    }
+    h1Bias = h1Sweep.side === 'bullish' ? 'BULLISH' : 'BEARISH';
+    h1Metadata = { h1Mode: 'AUTO', h1ConfirmationSource: retained ? 'PERSISTED' : 'LATEST_COMPLETED_CANDLE' };
   }
 
+  const side = h1Bias === 'BULLISH' ? 'bullish' : 'bearish';
   const fib = calculateFib(h1Sweep.candle, side);
-  const entries = findM5Entries(m5, side, h1Sweep.time, fib, evaluationTime);
+  const entries = findM5Entries(m5, side, h1Sweep.time, fib, now);
   const blockedEntries = entries.filter(entry => !entry.setupValid);
   const riskIssues = [];
   if (blockedEntries.some(entry => !entry.stopSideValid)) riskIssues.push('a stop-loss is on the wrong side of its entry');
   if (blockedEntries.some(entry => !entry.takeProfitValid)) riskIssues.push('the Fib 0 target is not beyond the entry in the trade direction');
   return {
-    bias, biasReason, ...biasMetadata, ...h1Metadata,
+    ...dailyMetadata, h1Bias, ...h1Metadata,
     h1Status: 'CONFIRMED',
     entryStatus: entries.length ? (blockedEntries.length ? 'SETUP_BLOCKED_BY_RISK_RULE' : 'ENTRY_DETECTED') : 'WAITING_FOR_M5',
     h1Sweep: {
@@ -340,8 +334,9 @@ function analyzeStrategy(input) {
 }
 
 
+
 module.exports = {
-  normalizeCandles, findHourlySweep, validateActiveHourlySweep, calculateFib, candleTouches,
+  normalizeCandles, findHourlySweep, findIndependentHourlySweep, validateActiveHourlySweep, calculateFib, candleTouches,
   findM5Entries, findHistoricalM5Entries, analyzeStrategy,
   assessMarketDataFreshness, gateStrategyOnFreshness
 };

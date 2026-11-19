@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { calculateFib, candleTouches, findHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, analyzeStrategy, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
+const { calculateFib, candleTouches, findHourlySweep, findIndependentHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, analyzeStrategy, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries } = require('./server');
@@ -27,6 +27,8 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('id="manualH1Bias"'));
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
+  assert.ok(browserUi.includes('No D1 direction is required.'));
+  assert.ok(browserUi.includes('This optional daily selection does not control H1 confirmation or M5 entries.'));
   assert.ok(browserUi.includes('H1 confirmation applied at'));
   assert.ok(browserUi.includes('Fibonacci rolls forward to the latest completed H1 candle'));
   assert.ok(browserUi.includes('immediately previous completed H1 candle'));
@@ -35,10 +37,11 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('STALE H1 DATA'));
   assert.ok(browserUi.includes('PAUSED — STALE DATA'));
   assert.ok(browserUi.includes('latest completed M5 candle closed at'));
-  assert.ok(browserUi.includes('Waiting for the latest completed H1 candle after your daily-bias selection at'));
+  assert.ok(browserUi.includes('Waiting for the latest completed H1 candle. It will be compared only with the immediately previous completed H1 candle for a bullish or bearish sweep.'));
   assert.ok(browserUi.includes('s.h1CandidateTime'));
   assert.ok(browserUi.includes('id="barCountdownValue"'));
   assert.ok(browserUi.includes('AUTO_H1_CONFIRMATION_KEY'));
+  assert.ok(browserUi.includes("mode:'H1_INDEPENDENT_V1'"));
   assert.ok(browserUi.includes('activeH1='));
   assert.ok(browserUi.includes('saveActiveAutoH1Sweep'));
   assert.ok(browserUi.includes('const ledgerEntries ='));
@@ -229,6 +232,40 @@ test('H1 confirmation uses the immediately previous completed candle as its swee
   assert.equal(result.time, bars[3].time + 60 * 60 * 1000);
 });
 
+test('AUTO H1 independently detects bullish and bearish sweeps without D1 input', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const bullish = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
+  const bearish = { time: start + 3600000, open: 104, high: 108, low: 101, close: 102 };
+  assert.equal(findIndependentHourlySweep([previous, bullish], start + 2 * 3600000).side, 'bullish');
+  assert.equal(findIndependentHourlySweep([previous, bearish], start + 2 * 3600000).side, 'bearish');
+});
+
+test('AUTO H1 refuses to guess if one completed candle sweeps both sides', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
+  const outside = { time: start + 3600000, open: 103, high: 108, low: 97, close: 102 };
+  const result = findIndependentHourlySweep([previous, outside], start + 2 * 3600000);
+  assert.equal(result.ambiguous, true);
+  assert.ok(result.bullish);
+  assert.ok(result.bearish);
+});
+
+test('AUTO H1 can choose bearish even when the optional D1 bias is bullish', () => {
+  const start = Date.parse('2026-11-16T08:00:00Z');
+  const previous = c('2026-11-16T08:00:00', 102, 105, 100, 103);
+  const bearish = c('2026-11-16T09:00:00', 104, 108, 101, 102);
+  const result = analyzeStrategy({
+    d1: [], h1: [previous, bearish], m5: [],
+    manualBias: 'BULLISH', manualBiasSince: start - 3600000,
+    now: start + 2 * 3600000
+  });
+  assert.equal(result.bias, 'BULLISH');
+  assert.equal(result.h1Bias, 'BEARISH');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.deepEqual(result.fib, calculateFib(bearish, 'bearish'));
+});
+
 test('manual bullish daily bias starts H1 search at selection time without D1 analysis', () => {
   const h1 = [
     c('2026-11-10T05:00:00', 102, 104, 100, 102),
@@ -290,7 +327,7 @@ test('manual bias selected mid-hour accepts a matching sweep when that H1 candle
   assert.equal(result.h1Sweep.time, h1[1].time + 60 * 60 * 1000);
 });
 
-test('manual bias excludes an H1 sweep candle that closed before selection', () => {
+test('AUTO H1 checks the latest completed candle without a D1 start-time gate', () => {
   const h1 = [
     c('2026-11-16T10:00:00', 102, 104, 100, 102),
     c('2026-11-16T11:00:00', 102, 104, 99, 101),
@@ -308,36 +345,33 @@ test('manual bias excludes an H1 sweep candle that closed before selection', () 
   assert.equal(result.biasMode, 'MANUAL');
   assert.equal(result.h1Status, 'WAITING_FOR_H1_SWEEP');
   assert.equal(result.h1BarsChecked, 1);
-  assert.equal(result.h1SearchAfter, selectedAfterClose);
+  assert.equal(result.h1CandidateTime, h1[2].time);
+  assert.equal(result.h1ReferenceTime, h1[1].time);
 });
 
-test('manual bias ignores an H1 sweep that occurred before the user selected it', () => {
+test('AUTO H1 detects its own latest valid sweep without a D1 timestamp', () => {
   const h1 = [
     c('2026-11-10T05:00:00', 102, 104, 100, 102),
-    c('2026-11-10T06:00:00', 102, 103, 99, 101),
-    c('2026-11-10T07:00:00', 102, 103, 101, 102)
+    c('2026-11-10T06:00:00', 102, 103, 99, 101)
   ];
-  const result = analyzeStrategy({
-    d1: [],
-    h1,
-    m5: [],
-    manualBias: 'BULLISH',
-    manualBiasSince: h1[2].time
-  });
-  assert.equal(result.bias, 'BULLISH');
-  assert.equal(result.biasMode, 'MANUAL');
-  assert.equal(result.h1Status, 'WAITING_FOR_H1_SWEEP');
-  assert.equal(result.h1Sweep, undefined);
+  const result = analyzeStrategy({d1:[],h1,m5:[]});
+  assert.equal(result.bias, 'WAITING');
+  assert.equal(result.h1Bias, 'BULLISH');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.h1Sweep.candle.time, h1[1].time);
 });
 
-test('manual daily bias is required and invalid metadata never activates automatic D1 analysis', () => {
-  const d1 = [c('2026-11-10T00:00:00', 100, 110, 90, 105)];
-  const result = analyzeStrategy({d1,h1:[],m5:[],manualBias:'BULLISH'});
+test('AUTO H1 works without any manual daily bias or D1 direction', () => {
+  const h1 = [
+    c('2026-11-10T05:00:00', 102, 104, 100, 102),
+    c('2026-11-10T06:00:00', 102, 103, 99, 102)
+  ];
+  const result = analyzeStrategy({d1:[],h1,m5:[]});
   assert.equal(result.bias, 'WAITING');
   assert.equal(result.biasMode, 'UNSET');
-  assert.equal(result.h1Status, 'WAITING_FOR_DAILY_BIAS');
-  assert.equal(result.d1Sweep, undefined);
-  assert.equal(result.daily, undefined);
+  assert.equal(result.h1Bias, 'BULLISH');
+  assert.equal(result.h1Status, 'CONFIRMED');
+  assert.equal(result.entryStatus, 'WAITING_FOR_M5');
 });
 
 test('manual H1 confirmation uses the latest completed H1 candle as its Fib anchor and starts M5 after selection', () => {
@@ -402,7 +436,7 @@ test('manual H1 reference rolls forward to the latest completed candle instead o
   assert.equal(result.entries.some(entry => entry.time === oldM5.time), false);
 });
 
-test('manual H1 confirmation refuses a direction that conflicts with the selected daily bias', () => {
+test('manual H1 direction can differ from the optional daily direction', () => {
   const h1 = [c('2026-11-16T09:00:00', 103, 106, 102, 105)];
   const result = analyzeStrategy({
     d1: [], h1, m5: [],
@@ -411,10 +445,11 @@ test('manual H1 confirmation refuses a direction that conflicts with the selecte
     manualH1Bias: 'BEARISH',
     manualH1BiasSince: Date.parse('2026-11-16T10:30:00Z')
   });
-  assert.equal(result.h1Status, 'MANUAL_H1_DIRECTION_MISMATCH');
+  assert.equal(result.h1Status, 'CONFIRMED');
   assert.equal(result.h1Mode, 'MANUAL');
-  assert.equal(result.entries.length, 0);
-  assert.equal(result.fib, null);
+  assert.equal(result.h1Bias, 'BEARISH');
+  assert.equal(result.h1Sweep.manual, true);
+  assert.deepEqual(result.fib, calculateFib(h1[0], 'bearish'));
 });
 
 test('manual H1 confirmation requires a completed reference candle', () => {
@@ -422,8 +457,6 @@ test('manual H1 confirmation requires a completed reference candle', () => {
   const selectedAt = Date.parse('2026-11-16T10:30:00Z');
   const result = analyzeStrategy({
     d1: [], h1, m5: [],
-    manualBias: 'BULLISH',
-    manualBiasSince: Date.parse('2026-11-16T08:00:00Z'),
     manualH1Bias: 'BULLISH',
     manualH1BiasSince: selectedAt,
     now: selectedAt
@@ -447,17 +480,17 @@ test('AUTO H1 accepts only a previously captured and revalidated anchor after it
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const active = {
-    bias: 'BULLISH', biasSelectedAt: start - 3600000,
+    mode: 'H1_INDEPENDENT_V1', bias: 'BULLISH',
     candleTime: sweep.time, closeTime: sweep.time + 3600000,
     referenceCandleTime: previous.time
   };
   const result = analyzeStrategy({
     d1: [], h1: [previous, sweep, newer], m5: [],
-    manualBias: 'BULLISH', manualBiasSince: start - 3600000,
     activeH1: active, now: start + 3 * 3600000
   });
   assert.equal(result.h1Status, 'CONFIRMED');
   assert.equal(result.h1Mode, 'AUTO');
+  assert.equal(result.h1Bias, 'BULLISH');
   assert.equal(result.h1ConfirmationSource, 'PERSISTED');
   assert.equal(result.h1Sweep.persisted, true);
   assert.equal(result.h1Sweep.candle.time, sweep.time);
@@ -495,33 +528,32 @@ test('persisted AUTO H1 confirmation remains active after a newer H1 candle clos
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const bars = [previous, sweep, newer];
-  const biasSelectedAt = start - 3600000;
   const active = {
-    bias: 'BULLISH', biasSelectedAt, candleTime: sweep.time,
+    mode: 'H1_INDEPENDENT_V1', bias: 'BULLISH', candleTime: sweep.time,
     closeTime: sweep.time + 3600000, referenceCandleTime: previous.time
   };
-  assert.equal(findHourlySweep(bars, 'bullish', biasSelectedAt, start + 3 * 3600000), null);
-  const retained = validateActiveHourlySweep(bars, 'bullish', biasSelectedAt, active, start + 3 * 3600000);
+  assert.equal(findHourlySweep(bars, 'bullish', 0, start + 3 * 3600000), null);
+  const retained = validateActiveHourlySweep(bars, active, start + 3 * 3600000);
   assert.ok(retained);
   assert.equal(retained.persisted, true);
   assert.equal(retained.candle.time, sweep.time);
   assert.equal(retained.referenceCandleTime, previous.time);
 });
 
-test('persisted AUTO H1 confirmation is rejected when its daily-bias key or candle details do not match', () => {
+test('persisted AUTO H1 confirmation is rejected when its mode or candle details do not match', () => {
   const start = Date.parse('2026-11-16T08:00:00Z');
   const previous = { time: start, open: 102, high: 105, low: 100, close: 103 };
   const sweep = { time: start + 3600000, open: 101, high: 104, low: 97, close: 101 };
   const newer = { time: start + 7200000, open: 101, high: 103, low: 99, close: 102 };
   const bars = [previous, sweep, newer];
   const active = {
-    bias: 'BULLISH', biasSelectedAt: start - 3600000,
+    mode: 'H1_INDEPENDENT_V1', bias: 'BULLISH',
     candleTime: sweep.time, closeTime: sweep.time + 3600000,
     referenceCandleTime: previous.time
   };
-  assert.equal(validateActiveHourlySweep(bars, 'bullish', start, active, start + 3 * 3600000), null);
-  assert.equal(validateActiveHourlySweep(bars, 'bearish', start - 3600000, active, start + 3 * 3600000), null);
-  assert.equal(validateActiveHourlySweep(bars, 'bullish', start - 3600000,
+  assert.equal(validateActiveHourlySweep(bars, active, start + 3 * 3600000), null);
+  assert.equal(validateActiveHourlySweep(bars, { ...active, mode: 'OLD_D1_KEYED' }, start + 3 * 3600000), null);
+  assert.equal(validateActiveHourlySweep(bars,
     { ...active, referenceCandleTime: start - 3600000 }, start + 3 * 3600000), null);
 });
 
