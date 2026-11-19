@@ -156,7 +156,7 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
   <div class="section-title">STRATEGY RULES</div>
   <p class="notice">Daily bias: check the D1 chart yourself, then select MANUAL BULLISH or MANUAL BEARISH above. The strategy does not scan D1 liquidity levels, sweeps, candlestick patterns, or confirmation rules.</p>
   <p class="notice">AUTO H1 confirmation checks only the latest completed H1 candle against the immediately preceding completed H1 candle, in the daily direction you selected. Older historical H1 sweeps are not reused. In MANUAL H1 mode, the selected direction must match your daily bias and Fibonacci uses the latest completed H1 candle as its reference; M5 monitoring starts after that candle closes and after your manual H1 selection.</p>
-  <p class="notice">M5 first-entry rule: touch of Fib 0.5; SL at Fib 0.618 and TP at Fib 0. BUY stop must be below entry; SELL stop must be above entry.</p>
+  <p class="notice">M5 first-entry rule: only the first touch of Fib 0.5 can create one trade for an H1 Fibonacci setup. Later touches of that same setup are ignored, even after SL or TP. SL is Fib 0.618 and TP is Fib 0. BUY stop must be below entry; SELL stop must be above entry.</p>
 </section>
 <footer>DAILYBIASTRADER • ANALYSIS ONLY • NO BROKER EXECUTION</footer>
 </main>
@@ -501,7 +501,7 @@ function renderTradeStats(){
   }
   const pipSize = summary.pipSize;
   el('statsNote').textContent =
-    'Tracks valid first-entry setups from your selected daily bias and H1 sequence within the available M5 history (up to 500 closed candles). Older setups outside that history may be missing. Outcomes use SiftingIO candles, not broker fills. Pip-size assumptions: ' +
+    'Tracks at most one first-entry trade for each H1 Fibonacci setup. Only the first Fib 0.5 touch is recorded; later touches are ignored even after SL or TP. Outcomes use SiftingIO candles, not broker fills. Pip-size assumptions: ' +
     selectedSymbol + ' = ' + (pipSize ? pipSize.toFixed(2) : 'unknown') +
     ' quoted-price units per pip. If one M5 candle touches both SL and TP, it is conservatively counted as SL because OHLC cannot show which was first.' +
     (tradeStorageAvailable ? ' Saved locally on this device.' : ' Local storage is unavailable; this session may not persist.');
@@ -620,6 +620,10 @@ async function refreshStrategy(){
     renderBarCountdown();
     const dataStale = freshness.stale === true || freshness.status === 'STALE' || freshness.status === 'NO_DATA';
     const h1DataStale = h1Freshness.stale === true || h1Freshness.status === 'STALE' || h1Freshness.status === 'NO_DATA' || h1Freshness.status === 'UNKNOWN';
+    const statsApi = window.DailyBiasTradeStats;
+    const displayEntries = (Array.isArray(s.entries) ? s.entries : []).filter(entry =>
+      !(statsApi && statsApi.hasRecordedSetup(tradeLedger,selectedSymbol,entry))
+    );
     const ledgerEntries = (Array.isArray(payload.historicalEntries) ? payload.historicalEntries : [])
       .concat(Array.isArray(s.entries) ? s.entries : []);
     updateTradeLedger(payload.m5Closed || [],ledgerEntries);
@@ -713,7 +717,7 @@ async function refreshStrategy(){
     el('riskWarning').textContent = s.riskWarning || '';
     el('riskWarning').classList.toggle('hidden', !s.riskWarning);
     renderFib(s.fib);
-    renderEntries(s.entries);
+    renderEntries(displayEntries);
   }catch(error){
     latestDataFreshness = {status:'UNKNOWN',stale:true};
     renderBarCountdown();
