@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { calculateFib, candleTouches, findHourlySweep, findIndependentHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, analyzeStrategy, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
-const { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades } = require('../public/trade-stats');
+const { PIP_SIZES, addSignalTrades, hasRecordedSetup, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
 const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries } = require('./server');
 
@@ -28,6 +28,8 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
   assert.ok(browserUi.includes('No D1 direction is required.'));
+  assert.ok(browserUi.includes('Only the first touch of Fib 0.5 can create one trade'));
+  assert.ok(browserUi.includes('hasRecordedSetup(tradeLedger,selectedSymbol,entry)'));
   assert.ok(browserUi.includes('This optional daily selection does not control H1 confirmation or M5 entries.'));
   assert.ok(browserUi.includes('H1 direction applied at'));
   assert.ok(browserUi.includes('Fibonacci rolls forward to the latest completed H1 candle'));
@@ -110,6 +112,28 @@ test('trade ledger records only valid first entries and deduplicates repeated si
   assert.equal(once[0].status, 'OPEN');
 });
 
+test('trade ledger records only one trade per H1 Fibonacci setup, including after refresh', () => {
+  const setupId = 'XAUUSD|FIRST_ENTRY|BUY|1794286800000|110.00000000|107.64000000|120.00000000';
+  const first = {
+    type: 'FIRST_ENTRY', direction: 'BUY', time: 1000,
+    entry: 110, stopLoss: 107.64, takeProfit: 120,
+    setupId, setupValid: true
+  };
+  const repeatedTouch = { ...first, time: 2000 };
+  const once = addSignalTrades([], 'XAUUSD', [first, repeatedTouch], 5000);
+  assert.equal(once.length, 1);
+  assert.equal(once[0].setupId, setupId);
+  const afterRefresh = addSignalTrades(once, 'XAUUSD', [{ ...first, time: 3000 }], 6000);
+  assert.equal(afterRefresh.length, 1);
+  assert.equal(hasRecordedSetup(afterRefresh, 'XAUUSD', repeatedTouch), true);
+
+  // Existing v1 saved rows have no setupId; the same exact Fib prices still
+  // block a repeat after the app upgrades.
+  const legacy = addSignalTrades([], 'XAUUSD', [{ ...first, setupId: undefined }], 7000);
+  assert.equal(hasRecordedSetup(legacy, 'XAUUSD', first), true);
+  assert.equal(addSignalTrades(legacy, 'XAUUSD', [first], 8000).length, 1);
+});
+
 test('trade statistics accept Gold only and ignore legacy Silver/Oil rows', () => {
   assert.deepEqual(Object.keys(PIP_SIZES), ['XAUUSD']);
   const entries = [
@@ -188,15 +212,19 @@ test('trade summary counts TP, SL, open trades and net pips per selected market'
   assert.equal(summarizeTrades(ledger, 'USOIL').total, 0);
 });
 
-test('historical M5 replay contains first entries only', () => {
+test('historical M5 replay records only the first Fib 0.5 touch for one H1 setup', () => {
   const fib = { '0': 100, '0.5': 110, '0.618': 112.36, '1': 120 };
   const bars = [
     c('2026-11-10T05:00:00', 111, 111, 109, 110.5),
-    c('2026-11-10T05:05:00', 110.5, 111, 110.1, 110.5),
-    c('2026-11-10T05:10:00', 112.5, 113, 111, 112)
+    c('2026-11-10T05:05:00', 110.5, 111, 99, 100.5),
+    c('2026-11-10T05:10:00', 109, 111, 108, 109)
   ];
-  const entries = findHistoricalM5Entries(bars, 'bearish', bars[0].time, fib);
+  const sweepTime = bars[0].time;
+  const entries = findHistoricalM5Entries(bars, 'bearish', sweepTime, fib);
+  const live = findM5Entries([bars[0]], 'bearish', sweepTime, fib);
   assert.equal(entries.filter(entry => entry.type === 'FIRST_ENTRY').length, 1);
+  assert.equal(entries[0].time, bars[0].time);
+  assert.equal(entries[0].setupId, live[0].setupId);
   assert.equal(entries.some(entry => entry.type === 'SECOND_ENTRY'), false);
 });
 
@@ -579,13 +607,17 @@ test('first M5 entry retains a recent Fib 0.5 touch for one following candle', (
   assert.equal(first.entry, fib['0.5']);
 });
 
-test('first M5 entry is not re-signalled after a later candle already hits SL or TP', () => {
+test('a repeated Fib 0.5 touch cannot create a second live entry after SL', () => {
   const fib = { '0': 120, '0.5': 110, '0.618': 107.64, '1': 100 };
-  const touch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
-  const resolved = c('2026-11-10T05:05:00', 112, 121, 111, 119);
-  const latest = c('2026-11-10T05:10:00', 114, 115, 113, 114);
-  const entries = findM5Entries([touch, resolved, latest], 'bullish', touch.time, fib, Date.parse('2026-11-10T05:15:00Z'));
-  assert.equal(entries.some(entry => entry.type === 'FIRST_ENTRY'), false);
+  const firstTouch = c('2026-11-10T05:00:00', 109, 111, 108, 109);
+  const stopHit = c('2026-11-10T05:05:00', 110, 111, 107, 108);
+  const between = c('2026-11-10T05:10:00', 112, 113, 111, 112);
+  const repeatedTouch = c('2026-11-10T05:15:00', 109, 111, 108, 109);
+  const entries = findM5Entries(
+    [firstTouch, stopHit, between, repeatedTouch], 'bullish', firstTouch.time, fib,
+    Date.parse('2026-11-10T05:20:00Z')
+  );
+  assert.deepEqual(entries, []);
 });
 
 test('first M5 entry recent-bar fallback rejects a touch older than the live freshness window', () => {
