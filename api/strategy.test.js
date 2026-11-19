@@ -28,7 +28,7 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('MANUAL_H1_BIAS_KEY'));
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
   assert.ok(browserUi.includes('No D1 direction is required.'));
-  assert.ok(browserUi.includes('Only the first touch of Fib 0.5 can create one trade'));
+  assert.ok(browserUi.includes('only the first touch of Fib 0.5 can create one trade'));
   assert.ok(browserUi.includes('hasRecordedSetup(tradeLedger,selectedSymbol,entry)'));
   assert.ok(browserUi.includes('This optional daily selection does not control H1 confirmation or M5 entries.'));
   assert.ok(browserUi.includes('H1 direction applied at'));
