@@ -126,62 +126,57 @@ function calculateFib(sweep, side) {
 
 function candleTouches(candle, price) { return candle.low <= price && candle.high >= price; }
 
-function findM5Entries(rawBars, side, sweepTime, fib, evaluationTime = null) {
-  const bars = normalizeCandles(rawBars).filter(c => c.time >= sweepTime);
-  const entries = [];
-  let first = null;
+function entrySetupId(side, sweepTime, fib) {
+  const priceKey = value => Number(value).toFixed(8);
+  return [
+    'XAUUSD', 'FIRST_ENTRY', side === 'bullish' ? 'BUY' : 'SELL',
+    Number(sweepTime), priceKey(fib['0.5']), priceKey(fib['0.618']), priceKey(fib['0'])
+  ].join('|');
+}
 
-  // Existing first-entry rule: a recent M5 range touch of Fib 0.5.
-  // Do not re-signal a touch after a later candle has already hit SL or TP.
-  const firstSearchStart = Math.max(0, bars.length - FIRST_ENTRY_RECENT_BARS);
-  for (let index = bars.length - 1; index >= firstSearchStart; index -= 1) {
-    const candidate = bars[index];
-    if (!candleTouches(candidate, fib['0.5'])) continue;
-    if (evaluationTime !== null && evaluationTime !== undefined && Number.isFinite(Number(evaluationTime))) {
-      const ageSinceClose = Number(evaluationTime) - (candidate.time + M5_CANDLE_MS);
-      if (ageSinceClose > FIRST_ENTRY_MAX_AGE_MS || ageSinceClose < -M5_CANDLE_MS) continue;
-    }
-    const laterBars = bars.slice(index + 1);
-    const alreadyResolved = laterBars.some(candle => {
-      const stopHit = side === 'bullish' ? candle.low <= fib['0.618'] : candle.high >= fib['0.618'];
-      const targetHit = side === 'bullish' ? candle.high >= fib['0'] : candle.low <= fib['0'];
-      return stopHit || targetHit;
-    });
-    if (!alreadyResolved) { first = candidate; break; }
+function buildFirstEntry(candidate, side, sweepTime, fib) {
+  const entry = fib['0.5'], stop = fib['0.618'], takeProfit = fib['0'];
+  const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
+  const takeProfitValid = side === 'bullish' ? takeProfit > entry : takeProfit < entry;
+  const setupValid = stopSideValid && takeProfitValid;
+  const status = !stopSideValid ? 'BLOCKED_INVALID_STOP_SIDE'
+    : !takeProfitValid ? 'BLOCKED_INVALID_TARGET_SIDE' : 'SETUP_DETECTED';
+  return {
+    type: 'FIRST_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
+    time: candidate.time, entry, stopLoss: stop, takeProfit,
+    setupId: entrySetupId(side, sweepTime, fib),
+    stopSideValid, stopValid: stopSideValid, takeProfitValid, setupValid, status,
+    reason: !stopSideValid ? 'Fib 0.618 stop is on the wrong side of the 0.5 entry'
+      : !takeProfitValid ? 'Fib 0 target is not beyond the entry in the trade direction'
+        : 'First M5 range touch of Fibonacci 0.5 for this H1 setup'
+  };
+}
+
+function findM5Entries(rawBars, side, sweepTime, fib, evaluationTime = null) {
+  const bars = normalizeCandles(rawBars).filter(c => c.time >= Number(sweepTime));
+  if (!bars.length) return [];
+
+  // The first 0.5 touch consumes this H1 Fibonacci setup. Later touches are
+  // never new entries, even after the original trade reaches SL or TP.
+  const firstTouchIndex = bars.findIndex(candle => candleTouches(candle, fib['0.5']));
+  if (firstTouchIndex < 0) return [];
+
+  // Live signals are only actionable while the original first touch is recent.
+  const recentStart = Math.max(0, bars.length - FIRST_ENTRY_RECENT_BARS);
+  if (firstTouchIndex < recentStart) return [];
+
+  const firstTouch = bars[firstTouchIndex];
+  if (evaluationTime !== null && evaluationTime !== undefined && Number.isFinite(Number(evaluationTime))) {
+    const ageSinceClose = Number(evaluationTime) - (firstTouch.time + M5_CANDLE_MS);
+    if (ageSinceClose > FIRST_ENTRY_MAX_AGE_MS || ageSinceClose < -M5_CANDLE_MS) return [];
   }
-  if (first) {
-    const entry = fib['0.5'], stop = fib['0.618'], takeProfit = fib['0'];
-    const stopSideValid = side === 'bullish' ? stop < entry : stop > entry;
-    const takeProfitValid = side === 'bullish' ? takeProfit > entry : takeProfit < entry;
-    const setupValid = stopSideValid && takeProfitValid;
-    const status = !stopSideValid ? 'BLOCKED_INVALID_STOP_SIDE'
-      : !takeProfitValid ? 'BLOCKED_INVALID_TARGET_SIDE' : 'SETUP_DETECTED';
-    entries.push({
-      type: 'FIRST_ENTRY', direction: side === 'bullish' ? 'BUY' : 'SELL',
-      time: first.time, entry, stopLoss: stop, takeProfit,
-      stopSideValid, stopValid: stopSideValid, takeProfitValid, setupValid, status,
-      reason: !stopSideValid ? 'Fib 0.618 stop is on the wrong side of the 0.5 entry'
-        : !takeProfitValid ? 'Fib 0 target is not beyond the entry in the trade direction'
-          : 'M5 range touched Fibonacci 0.5'
-    });
-  }
-  return entries;
+  return [buildFirstEntry(firstTouch, side, sweepTime, fib)];
 }
 
 function findHistoricalM5Entries(rawBars, side, sweepTime, fib) {
-  const bars = normalizeCandles(rawBars).filter(candle => candle.time >= sweepTime);
-  const found = [];
-  for (const candle of bars) {
-    // Reuse the live entry detector for each completed historical candle.
-    // Each bar is treated as the latest bar at that point in the replay.
-    found.push(...findM5Entries([candle], side, sweepTime, fib));
-  }
-  const unique = new Map();
-  for (const entry of found) {
-    const key = [entry.type, entry.direction, entry.time, entry.entry, entry.stopLoss, entry.takeProfit].join('|');
-    if (!unique.has(key)) unique.set(key, entry);
-  }
-  return [...unique.values()].sort((a, b) => a.time - b.time || a.type.localeCompare(b.type));
+  const bars = normalizeCandles(rawBars).filter(candle => candle.time >= Number(sweepTime));
+  const firstTouch = bars.find(candle => candleTouches(candle, fib['0.5']));
+  return firstTouch ? [buildFirstEntry(firstTouch, side, sweepTime, fib)] : [];
 }
 
 function assessMarketDataFreshness(rawBars, now = Date.now()) {
