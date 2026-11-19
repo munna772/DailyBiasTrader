@@ -15,7 +15,30 @@
     return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
   }
 
+  function priceLevelKey(symbol, entry) {
+    const numberKey = value => Number(value).toFixed(8);
+    const values = [entry && entry.entry, entry && entry.stopLoss, entry && entry.takeProfit].map(Number);
+    if (!values.every(Number.isFinite)) return null;
+    return [String(symbol).toUpperCase(), String(entry.type), String(entry.direction), ...values.map(numberKey)].join('|');
+  }
+
+  function hasRecordedSetup(existingTrades, symbol, entry) {
+    const market = String(symbol || '').toUpperCase();
+    const setupId = String(entry && entry.setupId || '').trim();
+    if (!market || !setupId) return false;
+    const currentLevel = priceLevelKey(market, entry);
+    return (Array.isArray(existingTrades) ? existingTrades : []).some(trade => {
+      if (!trade || trade.symbol !== market) return false;
+      if (trade.setupId && String(trade.setupId) === setupId) return true;
+      // Older v1 ledger rows did not store setupId. Match their exact direction
+      // and three Fibonacci prices to prevent an immediate post-upgrade repeat.
+      return !trade.setupId && currentLevel !== null && priceLevelKey(market, trade) === currentLevel;
+    });
+  }
+
   function makeTradeId(symbol, entry) {
+    const setupId = String(entry && entry.setupId || '').trim();
+    if (setupId) return [String(symbol).toUpperCase(), String(entry.type), 'SETUP', setupId].join('|');
     const numberKey = value => Number(value).toFixed(8);
     return [
       String(symbol).toUpperCase(),
@@ -47,6 +70,7 @@
       const takeProfit = Number(entry.takeProfit);
       if (![entryTime, entryPrice, stopLoss, takeProfit].every(Number.isFinite)) continue;
 
+      if (hasRecordedSetup(trades, market, entry)) continue;
       const id = makeTradeId(market, entry);
       if (knownIds.has(id)) continue;
       knownIds.add(id);
@@ -55,6 +79,7 @@
         symbol: market,
         type: entry.type,
         direction: entry.direction,
+        setupId: String(entry.setupId || '').trim() || null,
         entryTime,
         entry: entryPrice,
         stopLoss,
@@ -144,5 +169,5 @@
     };
   }
 
-  return { PIP_SIZES, addSignalTrades, resolveTrades, summarizeTrades };
+  return { PIP_SIZES, addSignalTrades, hasRecordedSetup, resolveTrades, summarizeTrades };
 });

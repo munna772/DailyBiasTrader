@@ -29,7 +29,7 @@ The TradingView chart is a separate display feed and may not have identical cand
 - H1 AUTO confirmation independently checks the latest completed H1 candle against the immediately preceding completed H1 candle for either a bullish low sweep or a bearish high sweep. If one candle sweeps both sides, the app reports ambiguity and does not guess.
 - H1 MANUAL confirmation remains available and is independent of any D1 direction. Fibonacci uses the latest completed H1 candle as its reference.
 - Fibonacci is anchored to the entire H1 reference/sweep candle high-low range. BUY: Fib 1 is the low and Fib 0 is the high. SELL: Fib 1 is the high and Fib 0 is the low.
-- M5 first entry only: touch of Fib 0.5; BUY stop at Fib 0.618 below entry, SELL stop at Fib 0.618 above entry; target Fib 0.
+- M5 first entry only: the first touch of Fib 0.5 creates at most one trade signal for that H1 Fibonacci setup. Later touches of the same setup are ignored, even after SL or TP. BUY stop is Fib 0.618 below entry; SELL stop is Fib 0.618 above entry; target is Fib 0.
 - Risk validation checks stop-loss side and target side. Blocked levels remain visible for review; the app does not send orders or guarantee that a setup is profitable.
 - M5 data is considered stale when the latest candle has been closed for more than 15 minutes. While stale, the app displays a freshness warning and suppresses M5 entry signals rather than replaying old candles. Stale data may mean the market is closed or the provider is delayed; it is not treated as proof of an API failure.
 
