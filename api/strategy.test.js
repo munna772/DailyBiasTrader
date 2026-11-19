@@ -29,7 +29,7 @@ test('browser and Android UI stay identical, use manual daily bias, and preserve
   assert.ok(browserUi.includes('H1 CONFIRMATION MODE'));
   assert.ok(browserUi.includes('No D1 direction is required.'));
   assert.ok(browserUi.includes('This optional daily selection does not control H1 confirmation or M5 entries.'));
-  assert.ok(browserUi.includes('H1 confirmation applied at'));
+  assert.ok(browserUi.includes('H1 direction applied at'));
   assert.ok(browserUi.includes('Fibonacci rolls forward to the latest completed H1 candle'));
   assert.ok(browserUi.includes('immediately previous completed H1 candle'));
   assert.ok(browserUi.includes('older M5 candles are ignored'));
@@ -551,7 +551,9 @@ test('persisted AUTO H1 confirmation is rejected when its mode or candle details
     candleTime: sweep.time, closeTime: sweep.time + 3600000,
     referenceCandleTime: previous.time
   };
-  assert.equal(validateActiveHourlySweep(bars, active, start + 3 * 3600000), null);
+  const retained = validateActiveHourlySweep(bars, active, start + 3 * 3600000);
+  assert.ok(retained);
+  assert.equal(retained.persisted, true);
   assert.equal(validateActiveHourlySweep(bars, { ...active, mode: 'OLD_D1_KEYED' }, start + 3 * 3600000), null);
   assert.equal(validateActiveHourlySweep(bars,
     { ...active, referenceCandleTime: start - 3600000 }, start + 3 * 3600000), null);

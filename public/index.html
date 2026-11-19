@@ -648,7 +648,7 @@ async function refreshStrategy(){
       const h1Age = h1Freshness.ageMinutes === null ? 'age unknown' : h1Freshness.ageMinutes + ' min since close';
       if(isManualH1 && s.h1Status === 'CONFIRMED'){
         el('h1Detail').textContent = 'MANUAL ' + s.manualH1Bias + ' H1 DIRECTION IS SELECTED (applied at ' + formatTime(manualH1Since) +
-          '). This manual H1 choice is independent of D1. The latest completed H1 candle opened at ' + latestH1Open +
+          '). This manual H1 choice is independent of D1 and is NOT a detected H1 liquidity sweep. The latest completed H1 candle opened at ' + latestH1Open +
           ' and closed at ' + latestH1Close + ' (' + h1Age + '); the H1 feed is stale. M5 entries are PAUSED until fresh H1 data is available. ' +
           'The old candle in history is only a reference and is not proof of a current H1 sweep.';
       } else {
