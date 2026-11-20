@@ -6,7 +6,7 @@ const path = require('node:path');
 const { calculateFib, candleTouches, findHourlySweep, findIndependentHourlySweep, validateActiveHourlySweep, findM5Entries, findHistoricalM5Entries, analyzeStrategy, assessMarketDataFreshness, gateStrategyOnFreshness } = require('./strategy');
 const { PIP_SIZES, addSignalTrades, hasRecordedSetup, resolveTrades, summarizeTrades } = require('../public/trade-stats');
 const { DEFAULT_SYMBOL, SUPPORTED_SYMBOLS, normalizeSymbol } = require('./markets');
-const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries } = require('./server');
+const { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries, recoveryCooldownRemaining } = require('./server');
 
 function c(time, open, high, low, close) {
   return { time: Date.parse(time + 'Z'), open, high, low, close, volume: 1 };
@@ -797,6 +797,29 @@ test('historical entry events are suppressed unless both M5 and H1 feeds are fre
   assert.equal(marketDataFreshForEntries({ status: 'STALE', stale: true }, freshH1), false);
   assert.equal(marketDataFreshForEntries(null, freshH1), false);
   assert.equal(marketDataFreshForEntries(freshM5, null), false);
+});
+
+test('feed recovery enforces a bounded cooldown between provider refresh requests', () => {
+  assert.equal(recoveryCooldownRemaining(null, 100000), 0);
+  assert.equal(recoveryCooldownRemaining(100000, 100000), 60);
+  assert.equal(recoveryCooldownRemaining(100000, 119500), 41);
+  assert.equal(recoveryCooldownRemaining(100000, 160000), 0);
+});
+
+test('Feed Recovery button requests a fresh provider check and preserves real-data safety', () => {
+  const serverSource = fs.readFileSync(path.join(__dirname, './server.js'), 'utf8');
+  for (const file of ['../public/index.html', '../app/src/main/assets/index.html']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.ok(source.includes('id="recoverFeed"'));
+    assert.ok(source.includes("'/api/recovery?symbol='"));
+    assert.ok(source.includes('recoveryCooldownUntil'));
+    assert.ok(source.includes('No complete newer M5 candle could be rebuilt'));
+    assert.ok(source.includes('The verified M5 feed can resume the countdown'));
+    assert.ok(source.includes("latestDataFreshness.stale === true"));
+  }
+  assert.ok(serverSource.includes("url.pathname === '/api/recovery'"));
+  assert.ok(serverSource.includes('loadMarket(symbol, { forceRefresh: true })'));
+  assert.ok(serverSource.includes('recoveryCooldownRemaining'));
 });
 
 test('SiftingIO history requests fetch a wide enough window and newest bars first', () => {

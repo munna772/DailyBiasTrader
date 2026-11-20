@@ -119,6 +119,10 @@ footer{text-align:center;color:#61738d;font-size:10px;padding:6px}
     <div class="metric"><small>OHLC DATA</small><b class="wait" id="dataStatus">NOT CONNECTED</b><div class="sub" id="dataDetail">D1 / H1 / M5</div></div>
   </div>
   <div class="notice" id="providerNote" style="margin-top:12px">Strategy candles: SiftingIO. TradingView chart data is independent; the API key stays on the server.</div>
+  <div class="row" style="margin-top:10px;align-items:flex-start;justify-content:flex-start">
+    <button id="recoverFeed" type="button">Recover feed</button>
+    <div class="notice" id="recoveryStatus" role="status" aria-live="polite" style="flex:1">Checks the SiftingIO feed directly, bypasses the short API cache, and keeps entries paused until real fresh candles are verified.</div>
+  </div>
   <div class="notice warn hidden" id="riskWarning" style="margin-top:10px"></div>
   <div class="notice" id="errorMessage" style="margin-top:10px" role="status"></div>
   <div class="sub" id="updatedAt" style="margin-top:10px">Not updated yet</div>
@@ -171,6 +175,9 @@ let selectedInterval = 'D';
 let chartTimer = null;
 let chartGeneration = 0;
 let strategyBusy = false;
+let recoveryBusy = false;
+let recoveryCooldownUntil = 0;
+const RECOVERY_COOLDOWN_MS = 60000;
 let chartWasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 const BAR_INTERVALS = Object.freeze({
   D: { label:'D1', key:'D1', durationMs:24*60*60*1000, maxAgeMs:4.2*24*60*60*1000 },
@@ -426,6 +433,86 @@ function renderBarCountdown(){
   overlay.classList.remove('is-paused','is-clock');
   overlay.title = note;
   overlay.setAttribute('aria-label',interval.label + ' bar closes in ' + el('barCountdownValue').textContent + '. ' + note);
+}
+function updateRecoveryControl(){
+  const button = el('recoverFeed');
+  if(recoveryBusy){
+    button.disabled = true;
+    button.textContent = 'Checking feed…';
+    return;
+  }
+  const seconds = Math.max(0,Math.ceil((recoveryCooldownUntil-Date.now())/1000));
+  button.disabled = seconds > 0;
+  button.textContent = seconds > 0
+    ? 'Retry in ' + String(Math.floor(seconds/60)).padStart(2,'0') + ':' + String(seconds%60).padStart(2,'0')
+    : 'Recover feed';
+}
+function recoveryAgeText(value){
+  return value && value.ageMinutes !== null && value.ageMinutes !== undefined && Number.isFinite(Number(value.ageMinutes))
+    ? Number(value.ageMinutes) + ' min since last completed candle'
+    : 'age unavailable';
+}
+async function recoverFeed(){
+  if(recoveryBusy || Date.now() < recoveryCooldownUntil) return;
+  if(typeof navigator !== 'undefined' && navigator.onLine === false){
+    el('recoveryStatus').textContent = 'Your device is offline. Reconnect first; no provider request was sent.';
+    return;
+  }
+  recoveryBusy = true;
+  recoveryCooldownUntil = Date.now() + RECOVERY_COOLDOWN_MS;
+  updateRecoveryControl();
+  el('recoveryStatus').textContent = 'Checking the API and requesting fresh SiftingIO candles. This does not create or alter any candle.';
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeout = setTimeout(function(){ if(controller) controller.abort(); },35000);
+  try{
+    const url = API_BASE + '/api/recovery?symbol=' + encodeURIComponent(selectedSymbol);
+    const response = await fetch(url,{
+      method:'GET',cache:'no-store',headers:{Accept:'application/json'},
+      signal:controller ? controller.signal : undefined
+    });
+    const payload = await response.json().catch(() => ({}));
+    if(!response.ok || !payload.ok){
+      const retrySeconds = Number(payload.retryAfterSeconds);
+      if(Number.isFinite(retrySeconds) && retrySeconds > 0){
+        recoveryCooldownUntil = Math.max(recoveryCooldownUntil,Date.now()+retrySeconds*1000);
+      }
+      throw new Error(payload.error || ('Feed recovery returned HTTP ' + response.status));
+    }
+    const m5 = payload.dataFreshness || {};
+    const h1 = payload.h1Freshness || {};
+    const diagnostics = payload.providerDiagnostics || {};
+    const m1 = diagnostics.M1 || null;
+    const m5Fallback = payload.m5Fallback || diagnostics.m5Fallback || {};
+    const m5State = 'M5 ' + (m5.status || 'UNKNOWN') + ' (' + recoveryAgeText(m5) + ')';
+    const h1State = 'H1 ' + (h1.status || 'UNKNOWN') + ' (' + recoveryAgeText(h1) + ')';
+    const m1Age = m1 && m1.latestCompletedAgeMinutes !== null && m1.latestCompletedAgeMinutes !== undefined && Number.isFinite(Number(m1.latestCompletedAgeMinutes))
+      ? m1.latestCompletedAgeMinutes + ' min since last completed candle'
+      : 'age unavailable';
+    const m1State = m1 ? 'M1 ' + m1Age : 'M1 unavailable';
+    let message = 'Fresh provider check completed. ' + m5State + '; ' + h1State + '; ' + m1State + '.';
+    if(m5.status === 'FRESH' && m5.stale === false){
+      message += ' The verified M5 feed can resume the countdown.';
+    }else{
+      message += ' M5 is still stale or missing, so its countdown and new entries remain paused.';
+    }
+    if(h1.status !== 'FRESH' || h1.stale !== false){
+      message += ' H1 is not fresh, so new entries remain blocked even if M5 is fresh.';
+    }
+    if(m5Fallback.error){ message += ' M1 fallback: ' + m5Fallback.error; }
+    else if(m5Fallback.attempted && !m5Fallback.addedBars){ message += ' No complete newer M5 candle could be rebuilt from five consecutive real M1 candles.'; }
+    el('recoveryStatus').textContent = message;
+    if(strategyBusy) strategyRefreshPending = true;
+    else await refreshStrategy();
+  }catch(error){
+    const message = error && (error.name === 'AbortError' || error.name === 'TimeoutError')
+      ? 'Feed recovery timed out. Check the connection or provider, then retry after the cooldown.'
+      : (error && error.message) || 'Feed recovery failed. The existing freshness protection remains active.';
+    el('recoveryStatus').textContent = 'Recovery check failed: ' + message;
+  }finally{
+    clearTimeout(timeout);
+    recoveryBusy = false;
+    updateRecoveryControl();
+  }
 }
 function setMetric(id, text, state){
   const node = el(id);
@@ -798,6 +885,7 @@ document.querySelectorAll('#timeframes button[data-tf]').forEach(button => {
 });
 el('reloadChart').addEventListener('click',renderChart);
 el('refreshStrategy').addEventListener('click',refreshStrategy);
+el('recoverFeed').addEventListener('click',recoverFeed);
 window.addEventListener('offline',function(){
   chartWasOffline = true;
   latestDataFreshness = {status:'OFFLINE',stale:true};
@@ -814,11 +902,12 @@ document.addEventListener('visibilitychange',function(){
   if(!document.hidden){ renderBarCountdown(); refreshStrategy(); }
 });
 syncManualBiasControls();
+updateRecoveryControl();
 renderTradeStats();
 renderChart();
 refreshStrategy();
 setInterval(function(){ if(!document.hidden) refreshStrategy(); },60000);
-setInterval(function(){ if(!document.hidden) renderBarCountdown(); },1000);
+setInterval(function(){ if(!document.hidden) renderBarCountdown(); updateRecoveryControl(); },1000);
 })();
 </script>
 </body>

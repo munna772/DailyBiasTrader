@@ -9,8 +9,10 @@ const PORT = Number(process.env.PORT || 10000);
 const API_KEY = process.env.DAILY_BIAS_TRADER || process.env.SIFTING_API_KEY || '';
 const PROVIDER = 'SiftingIO';
 const CACHE_TTL_MS = 120000;
+const RECOVERY_COOLDOWN_MS = 60000;
 const cache = new Map();
 const rateBuckets = new Map();
+const recoveryAttempts = new Map();
 const allowedOrigins = new Set([
   'https://dailybiastrader-preview.onrender.com',
   ...(process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -52,6 +54,12 @@ function allowRate(req) {
   bucket.count += 1;
   rateBuckets.set(ip, bucket);
   return bucket.count <= 30;
+}
+
+function recoveryCooldownRemaining(lastAttemptAt, now = Date.now()) {
+  const last = Number(lastAttemptAt);
+  if (!Number.isFinite(last) || last <= 0) return 0;
+  return Math.max(0, Math.ceil((RECOVERY_COOLDOWN_MS - (Number(now) - last)) / 1000));
 }
 
 function parseSiftingBars(response) {
@@ -321,14 +329,14 @@ function mergeFiveMinuteBars(primaryBars, minuteBars, now = Date.now()) {
   return { bars: normalizeCandles([...merged.values()]).slice(-500), added, fallbackBars };
 }
 
-async function loadMarket(symbolKey) {
+async function loadMarket(symbolKey, options = {}) {
   if (!API_KEY) {
     const error = new Error('SiftingIO API key is not configured. Set DAILY_BIAS_TRADER in Render.');
     error.statusCode = 503;
     throw error;
   }
   const cached = cache.get(symbolKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
+  if (!options.forceRefresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
   const providerSymbol = SUPPORTED_SYMBOLS[symbolKey];
   const [dailyRaw, hourlyRaw, fiveMinuteRaw] = await Promise.all([
@@ -458,7 +466,9 @@ const server = http.createServer(async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-  if (req.method !== 'GET' || url.pathname !== '/api/strategy') {
+  const isRecoveryRequest = req.method === 'GET' && url.pathname === '/api/recovery';
+  const isStrategyRequest = req.method === 'GET' && url.pathname === '/api/strategy';
+  if (!isRecoveryRequest && !isStrategyRequest) {
     return send(res, 404, { error: 'Not found' });
   }
   if (!allowRate(req)) return send(res, 429, { error: 'Too many requests. Please wait before refreshing.' });
@@ -466,6 +476,56 @@ const server = http.createServer(async (req, res) => {
   const symbol = normalizeSymbol(url.searchParams.get('symbol'));
   if (!symbol) {
     return send(res, 400, { error: 'This app supports XAUUSD (Gold) only.' });
+  }
+  if (isRecoveryRequest) {
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+    const recoveryKey = clientIp + ':' + symbol;
+    const now = Date.now();
+    const retryAfterSeconds = recoveryCooldownRemaining(recoveryAttempts.get(recoveryKey), now);
+    if (retryAfterSeconds > 0) {
+      return send(res, 429, {
+        ok: false,
+        error: 'A feed recovery check was recently attempted. Wait before requesting another provider refresh.',
+        retryAfterSeconds
+      });
+    }
+    // Set the cooldown before awaiting the provider so parallel taps cannot fan out requests.
+    recoveryAttempts.set(recoveryKey, now);
+    try {
+      const market = await loadMarket(symbol, { forceRefresh: true });
+      const checkedAt = Date.now();
+      const dataFreshness = assessMarketDataFreshness(market.m5, checkedAt);
+      const h1Freshness = assessH1DataFreshness(market.h1, checkedAt);
+      return send(res, 200, {
+        ok: true,
+        symbol,
+        provider: PROVIDER,
+        providerSymbol: market.providerSymbol,
+        source: market.source,
+        checkedAt: new Date(checkedAt).toISOString(),
+        fetchedAt: new Date(market.fetchedAt).toISOString(),
+        status: dataFreshness.status === 'FRESH' && h1Freshness.status === 'FRESH' ? 'FRESH' : 'STALE',
+        dataFreshness,
+        h1Freshness,
+        providerDiagnostics: market.providerDiagnostics,
+        m5Source: market.m5Source,
+        m5Fallback: market.m5Fallback,
+        h1Source: market.h1Source,
+        h1Fallback: market.h1Fallback,
+        retryAfterSeconds: Math.ceil(RECOVERY_COOLDOWN_MS / 1000)
+      });
+    } catch (error) {
+      console.error('[market-feed] recovery request failed: ' + strategyErrorMessage(error));
+      const status = Number.isInteger(error.statusCode) ? error.statusCode : 502;
+      return send(res, status, {
+        ok: false,
+        source: PROVIDER,
+        error: strategyErrorMessage(error),
+        feedConfigured: Boolean(API_KEY),
+        retryAfterSeconds: Math.ceil(RECOVERY_COOLDOWN_MS / 1000)
+      });
+    }
   }
   const manualBiasParam = String(url.searchParams.get('manualBias') || '').toUpperCase();
   let manualBias = null;
@@ -556,4 +616,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries };
+module.exports = { buildSeriesUrl, parseSiftingBars, buildFiveMinuteBarsFromOneMinute, mergeFiveMinuteBars, buildHourlyBarsFromOneMinute, mergeHourlyBars, buildLatestBarTimes, assessH1DataFreshness, describeSeries, marketDataFreshForEntries, recoveryCooldownRemaining };

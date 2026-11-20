@@ -21,6 +21,8 @@ The API maps XAUUSD directly to SiftingIO `XAUUSD`. No other instruments are ena
 Health endpoint: `/api/health`
 Strategy endpoint: `/api/strategy?symbol=XAUUSD` (XAUUSD / Gold only). Other symbols are rejected with HTTP 400.
 
+Feed Recovery endpoint: `/api/recovery?symbol=XAUUSD`. It bypasses the short server cache for one direct SiftingIO recheck, reports M5/H1 freshness and provider diagnostics, and enforces a 60-second per-client cooldown. A stale response remains stale; no synthetic candles are created and strategy entries remain gated.
+
 The TradingView chart is a separate display feed and may not have identical candles or prices to the SiftingIO strategy feed.
 
 ## Strategy rules
